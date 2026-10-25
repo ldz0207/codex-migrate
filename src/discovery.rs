@@ -148,16 +148,8 @@ fn read_schema_version(path: &Path) -> Result<Option<i64>> {
 fn find_executable(name: &str) -> Option<PathBuf> {
     let path = env::var_os("PATH").unwrap_or_default();
     for directory in env::split_paths(&path) {
-        let candidate = directory.join(name);
-        if candidate.is_file() {
+        if let Some(candidate) = executable_in(&directory, name) {
             return Some(candidate);
-        }
-        #[cfg(windows)]
-        {
-            let candidate = directory.join(format!("{name}.exe"));
-            if candidate.is_file() {
-                return Some(candidate);
-            }
         }
     }
     #[cfg(windows)]
@@ -199,6 +191,14 @@ fn find_executable(name: &str) -> Option<PathBuf> {
     None
 }
 
+fn executable_in(directory: &Path, name: &str) -> Option<PathBuf> {
+    #[cfg(windows)]
+    let candidate = directory.join(format!("{name}.exe"));
+    #[cfg(not(windows))]
+    let candidate = directory.join(name);
+    candidate.is_file().then_some(candidate)
+}
+
 fn command_version(executable: &Path) -> Result<String> {
     let output = Command::new(executable)
         .arg("--version")
@@ -221,4 +221,20 @@ fn is_wsl() -> bool {
         }
     }
     false
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ignores_npm_shell_and_cmd_shims_when_starting_native_codex() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(directory.path().join("codex"), "#!/bin/sh").unwrap();
+        std::fs::write(directory.path().join("codex.cmd"), "@echo off").unwrap();
+        assert!(executable_in(directory.path(), "codex").is_none());
+        let executable = directory.path().join("codex.exe");
+        std::fs::write(&executable, b"fixture").unwrap();
+        assert_eq!(executable_in(directory.path(), "codex"), Some(executable));
+    }
 }
