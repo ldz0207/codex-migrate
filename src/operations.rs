@@ -566,11 +566,9 @@ fn execute_import(
         }
         if !plan.threads.is_empty() {
             progress("Synchronizing Codex session index".to_owned());
-            let promoted = session_index::sync_imported(
-                &environment.codex_home,
-                source_root,
-                &plan.threads,
-            ).context("synchronize sidebar titles")?;
+            let promoted =
+                session_index::sync_imported(&environment.codex_home, source_root, &plan.threads)
+                    .context("synchronize sidebar titles")?;
             if let Some(state_db) = environment.state_db.as_deref() {
                 for (thread_id, updated_at) in promoted {
                     sqlite_adapter::promote_thread(state_db, &thread_id, updated_at)
