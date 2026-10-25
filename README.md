@@ -47,6 +47,23 @@ selected sessions into an existing local Codex environment.
 
 ## Features
 
+This fork integrates selective restoration into the desktop app and CLI:
+sessions start unselected and can be searched by title, UUID or project path.
+Select-all affects visible search results, with an optional archive filter.
+Required parent/subagent records appear in the import
+preview, and compressed `.jsonl.zst` input is supported. Imported sessions are
+checked through Codex for their UUID, title, mapped directory and historical
+page. The completion dialog distinguishes verified history, preserved archives,
+empty history and restoration that needs a retry. Existing local names and
+archive choices are preserved. No model turn is started.
+
+Windows users open the packaged `Codex Migrate.exe`; no development toolchain
+is needed. Close Codex before importing into its active home, choose the source
+backup, select sessions and map project folders, then review the preview.
+Completed NAS snapshots can be selected through their `current.json` data folder.
+The optional [native-restoration helper](docs/native-restore-windows.md) remains
+available for already-copied records.
+
 - Migrate active and archived sessions across macOS, Windows, Linux, and WSL.
 - Select individual projects and sessions before importing.
 - Map old project paths to folders on the new device.

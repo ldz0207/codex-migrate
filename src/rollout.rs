@@ -3,6 +3,30 @@ use serde_json::Value;
 use std::fs;
 use std::path::Path;
 
+pub fn is_rollout(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.ends_with(".jsonl") || name.ends_with(".jsonl.zst"))
+}
+
+pub fn read(path: &Path) -> Result<Vec<u8>> {
+    let bytes = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    if path.extension().and_then(|value| value.to_str()) == Some("zst") {
+        zstd::stream::decode_all(bytes.as_slice())
+            .with_context(|| format!("decompress {}", path.display()))
+    } else {
+        Ok(bytes)
+    }
+}
+
+pub fn encode_for_path(path: &Path, content: &[u8]) -> Result<Vec<u8>> {
+    if path.extension().and_then(|value| value.to_str()) == Some("zst") {
+        Ok(zstd::stream::encode_all(content, 0)?)
+    } else {
+        Ok(content.to_vec())
+    }
+}
+
 pub fn rewrite_cwd_bytes(content: &[u8], cwd: &Path) -> Result<(Vec<u8>, usize)> {
     let cwd = cwd.to_string_lossy();
     let mut output = Vec::with_capacity(content.len());
@@ -31,18 +55,18 @@ pub fn rewrite_cwd_bytes(content: &[u8], cwd: &Path) -> Result<(Vec<u8>, usize)>
 }
 
 pub fn rewrite_cwd_file(path: &Path, cwd: &Path) -> Result<usize> {
-    let original = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    let original = read(path)?;
     let (rewritten, changed) = rewrite_cwd_bytes(&original, cwd)?;
     if changed > 0 {
         let temporary = path.with_extension("jsonl.tmp");
-        fs::write(&temporary, rewritten)?;
+        fs::write(&temporary, encode_for_path(path, &rewritten)?)?;
         fs::rename(&temporary, path)?;
     }
     Ok(changed)
 }
 
 pub fn validate_cwd_file(path: &Path, cwd: &Path) -> Result<()> {
-    let content = fs::read(path).with_context(|| format!("read {}", path.display()))?;
+    let content = read(path)?;
     let expected = cwd.to_string_lossy();
     let mut session_meta = 0;
     for (line_number, line) in content.split(|byte| *byte == b'\n').enumerate() {

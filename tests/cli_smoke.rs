@@ -438,6 +438,202 @@ fn repeated_import_repairs_visibility_and_registers_project() {
     }
 }
 
+#[test]
+fn imports_compressed_selection_with_original_name_and_dependencies() {
+    use codex_migrate::{model::ImportOptions, operations};
+    use std::collections::BTreeSet;
+    let source = TempDir::new().unwrap();
+    let target = TempDir::new().unwrap();
+    let project = TempDir::new().unwrap();
+    let id = "11111111-2222-3333-4444-555555555555";
+    let child = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+    let unrelated = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
+    create_codex_home(source.path(), id);
+    create_empty_state_db(target.path());
+    Connection::open(target.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute_batch("PRAGMA journal_mode=WAL; ALTER TABLE threads ADD COLUMN history_mode TEXT NOT NULL DEFAULT 'legacy';")
+        .unwrap();
+    let main_path = create_rollout(source.path(), id, "/old/project/demo", "fallback", false);
+    let original = fs::read_to_string(&main_path).unwrap();
+    let mut main_lines = original
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    main_lines[0]["payload"]["history_mode"] = json!("paginated");
+    let original = main_lines
+        .iter()
+        .map(|line| line.to_string() + "\n")
+        .collect::<String>()
+        .into_bytes();
+    fs::write(
+        main_path.with_extension("jsonl.zst"),
+        zstd::stream::encode_all(original.as_slice(), 0).unwrap(),
+    )
+    .unwrap();
+    fs::remove_file(&main_path).unwrap();
+    let child_path = create_rollout(source.path(), child, "/old/project/demo", "Related", false);
+    let text = fs::read_to_string(&child_path).unwrap();
+    let mut lines = text
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    lines[0]["payload"]["source"] = json!({"subagent":{"thread_spawn":{"parent_thread_id":id}}});
+    lines[0]["payload"]["thread_source"] = json!("guardian_review");
+    lines.truncate(1);
+    fs::write(
+        child_path,
+        lines
+            .iter()
+            .map(|line| line.to_string() + "\n")
+            .collect::<String>(),
+    )
+    .unwrap();
+    create_rollout(
+        source.path(),
+        unrelated,
+        "/old/project/demo",
+        "Unrelated",
+        false,
+    );
+    fs::write(
+        source.path().join("session_index.jsonl"),
+        format!("{}\n", json!({"id":id,"thread_name":"原标题"})),
+    )
+    .unwrap();
+    let options = ImportOptions {
+        selected_thread_ids: BTreeSet::from([id.to_owned()]),
+        mappings: [(
+            "/old/project/demo".to_owned(),
+            project.path().to_string_lossy().into_owned(),
+        )]
+        .into_iter()
+        .collect(),
+        history_only_projects: BTreeSet::new(),
+    };
+    let plan =
+        operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap();
+    assert_eq!(plan.threads.len(), 2);
+    assert!(plan
+        .threads
+        .iter()
+        .any(|item| item.thread.id == child && item.reason.starts_with("Required related")));
+    assert_eq!(
+        plan.threads
+            .iter()
+            .find(|item| item.thread.id == id)
+            .unwrap()
+            .thread
+            .title,
+        "原标题"
+    );
+    let summary =
+        operations::import_directory(source.path(), Some(target.path()), &options, |_| {}).unwrap();
+    assert_eq!(summary.imported, 2);
+    assert_eq!(summary.native_results.len(), 2);
+    assert_eq!(summary.native_count("related"), 1);
+    let connection = Connection::open(target.path().join("state_5.sqlite")).unwrap();
+    let mode: String = connection
+        .query_row(
+            "SELECT history_mode FROM threads WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(mode, "paginated");
+    drop(connection);
+    let imported = codex_migrate::scanner::scan_codex_home(
+        target.path(),
+        Some(&target.path().join("state_5.sqlite")),
+    )
+    .unwrap();
+    assert_eq!(imported.len(), 2);
+    assert!(imported
+        .iter()
+        .all(|item| !item.source_path.to_string_lossy().ends_with(".zst")));
+    assert!(main_path.with_extension("jsonl.zst").is_file());
+    assert_eq!(
+        operations::import_directory(source.path(), Some(target.path()), &options, |_| {})
+            .unwrap()
+            .skipped,
+        2
+    );
+}
+
+#[test]
+fn existing_local_name_and_archive_survive_repeat_import() {
+    use codex_migrate::{model::ImportOptions, operations};
+    let source = TempDir::new().unwrap();
+    let target = TempDir::new().unwrap();
+    let project = TempDir::new().unwrap();
+    let id = "11111111-2222-3333-4444-555555555555";
+    create_codex_home(source.path(), id);
+    create_codex_home(target.path(), id);
+    let connection = Connection::open(target.path().join("state_5.sqlite")).unwrap();
+    connection
+        .execute_batch("ALTER TABLE threads ADD COLUMN name TEXT;")
+        .unwrap();
+    connection
+        .execute(
+            "UPDATE threads SET name='本机标题', archived=1 WHERE id=?1",
+            [id],
+        )
+        .unwrap();
+    drop(connection);
+    let options = ImportOptions {
+        selected_thread_ids: [id.to_owned()].into_iter().collect(),
+        mappings: [(
+            "/old/project/demo".to_owned(),
+            project.path().to_string_lossy().into_owned(),
+        )]
+        .into_iter()
+        .collect(),
+        history_only_projects: Default::default(),
+    };
+    let plan =
+        operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap();
+    assert_eq!(plan.threads[0].thread.title, "本机标题");
+    assert!(plan.threads[0].thread.archived);
+    operations::import_directory(source.path(), Some(target.path()), &options, |_| {}).unwrap();
+    let connection = Connection::open(target.path().join("state_5.sqlite")).unwrap();
+    let (name, archived): (String, bool) = connection
+        .query_row(
+            "SELECT name, archived FROM threads WHERE id=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(name, "本机标题");
+    assert!(archived);
+}
+
+#[test]
+fn resolves_completed_snapshot_and_rejects_tampering() {
+    use codex_migrate::operations;
+    use sha2::{Digest, Sha256};
+    let data = TempDir::new().unwrap();
+    let snapshot = data.path().join("snapshots/test");
+    fs::create_dir_all(snapshot.join("codex/sessions")).unwrap();
+    let manifest = b"{\"entries\":[]}";
+    fs::write(snapshot.join("manifest.json"), manifest).unwrap();
+    fs::write(
+        snapshot.join("COMPLETE.json"),
+        json!({"manifest_sha256":hex::encode(Sha256::digest(manifest))}).to_string(),
+    )
+    .unwrap();
+    fs::write(
+        data.path().join("current.json"),
+        "{\"snapshot\":\"snapshots/test\"}",
+    )
+    .unwrap();
+    assert_eq!(
+        operations::resolve_codex_root(data.path()).unwrap(),
+        snapshot.canonicalize().unwrap().join("codex")
+    );
+    fs::write(snapshot.join("manifest.json"), b"{}").unwrap();
+    assert!(operations::resolve_codex_root(data.path()).is_err());
+}
+
 fn create_codex_home(home: &Path, id: &str) {
     create_empty_state_db(home);
     let rollout = create_rollout(home, id, "/old/project/demo", "Test thread", false);

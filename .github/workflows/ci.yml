@@ -10,6 +10,16 @@ permissions:
   contents: read
 
 jobs:
+  native-restore:
+    name: Native restore protocol (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated native-restoration tests
+        run: |
+          python -VV
+          python -m unittest discover -s tests -p test_native_restore.py -v
+
   test:
     name: Test (${{ matrix.os }})
     strategy:
@@ -29,4 +39,11 @@ jobs:
         run: cargo clippy --all-targets --features gui -- -D warnings
       - name: Run tests
         run: cargo test --all-targets --features gui
+      - name: Keep Windows CLI for isolated smoke checks
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Windows-smoke-cli
+          path: target/debug/codex-migrate.exe
+          retention-days: 7
 

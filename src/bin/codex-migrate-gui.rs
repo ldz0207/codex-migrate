@@ -194,6 +194,8 @@ struct MigrationApp {
     export_parent: String,
     catalog: Option<SourceCatalog>,
     projects: Vec<UiProject>,
+    import_search: String,
+    include_archived: bool,
     repair_projects: Vec<UiProject>,
     html_projects: Vec<UiProject>,
     html_export_folder: String,
@@ -248,6 +250,8 @@ impl MigrationApp {
                 .into_owned(),
             catalog: None,
             projects: Vec::new(),
+            import_search: String::new(),
+            include_archived: false,
             repair_projects: Vec::new(),
             html_projects: Vec::new(),
             html_export_folder: String::new(),
@@ -854,12 +858,14 @@ impl MigrationApp {
     }
 
     fn all_state(&self) -> CheckState {
-        let selected = self.selected_count();
-        let total = self
+        let visible = self
             .projects
             .iter()
-            .map(|project| project.sessions.len())
-            .sum::<usize>();
+            .flat_map(|project| project.sessions.iter())
+            .filter(|session| session_matches(session, &self.import_search, self.include_archived))
+            .collect::<Vec<_>>();
+        let selected = visible.iter().filter(|session| session.selected).count();
+        let total = visible.len();
         match selected {
             0 => CheckState::None,
             value if value == total && total > 0 => CheckState::All,
@@ -869,7 +875,11 @@ impl MigrationApp {
 
     fn set_all(&mut self, selected: bool) {
         for project in &mut self.projects {
-            project.set_selected(selected);
+            for session in &mut project.sessions {
+                if session_matches(session, &self.import_search, self.include_archived) {
+                    session.selected = selected;
+                }
+            }
         }
         self.plan = None;
         if self.step == ImportStep::Preview {
@@ -963,7 +973,7 @@ impl MigrationApp {
             .frame(
                 egui::Frame::new()
                     .fill(SURFACE)
-                    .stroke(Stroke::new(1.0, BORDER))
+                    .stroke(Stroke::new(1.0_f32, BORDER))
                     .inner_margin(Margin::symmetric(24, 13)),
             )
             .show(context, |ui| {
@@ -1118,6 +1128,23 @@ impl MigrationApp {
         let pending = self.pending_mapping_count();
         let all_state = self.all_state();
         ui.horizontal(|ui| {
+            ui.label(tr(zh, "搜索对话", "Search sessions"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.import_search).hint_text(tr(
+                    zh,
+                    "标题、UUID 或项目路径",
+                    "Title, UUID or project path",
+                )),
+            );
+            bool_control(
+                ui,
+                &mut self.include_archived,
+                tr(zh, "包含已归档", "Include archived"),
+            );
+        });
+        ui.label(RichText::new(tr(zh, "默认不勾选；全选仅作用于当前搜索结果，已选对话会保留。", "Nothing is preselected. Select all affects visible results; earlier selections are retained.")).size(12.0).color(MUTED));
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
             ui.label(
                 RichText::new(tr(zh, "父目录映射", "Parent mapping"))
                     .size(13.0)
@@ -1166,7 +1193,9 @@ impl MigrationApp {
                 true,
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if selection_control(ui, all_state, tr(zh, "全选", "Select all")).clicked() {
+                if selection_control(ui, all_state, tr(zh, "全选当前结果", "Select visible"))
+                    .clicked()
+                {
                     self.set_all(all_state != CheckState::All);
                 }
             });
@@ -1191,6 +1220,11 @@ impl MigrationApp {
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     for project_index in 0..self.projects.len() {
+                        if !self.projects[project_index].sessions.iter().any(|session| {
+                            session_matches(session, &self.import_search, self.include_archived)
+                        }) {
+                            continue;
+                        }
                         self.project_card(ui, project_index);
                         ui.add_space(10.0);
                     }
@@ -1202,7 +1236,7 @@ impl MigrationApp {
                 if selection_control(
                     ui,
                     all_state,
-                    tr(zh, "全选项目与会话", "Select all projects and sessions"),
+                    tr(zh, "全选当前搜索结果", "Select all visible results"),
                 )
                 .clicked()
                 {
@@ -1246,13 +1280,27 @@ impl MigrationApp {
 
     fn project_card(&mut self, ui: &mut egui::Ui, index: usize) {
         let zh = self.chinese();
+        let query = self.import_search.clone();
+        let include_archived = self.include_archived;
         let project = &mut self.projects[index];
-        let state = project.state();
+        let visible = project
+            .sessions
+            .iter()
+            .filter(|session| session_matches(session, &query, include_archived))
+            .collect::<Vec<_>>();
+        let visible_selected = visible.iter().filter(|session| session.selected).count();
+        let state = if visible_selected == 0 {
+            CheckState::None
+        } else if visible_selected == visible.len() {
+            CheckState::All
+        } else {
+            CheckState::Partial
+        };
         let selected = project.selected_count();
         let total = project.sessions.len();
         egui::Frame::new()
             .fill(SURFACE)
-            .stroke(Stroke::new(1.0, BORDER))
+            .stroke(Stroke::new(1.0_f32, BORDER))
             .corner_radius(9.0)
             .show(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -1267,7 +1315,11 @@ impl MigrationApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             if selection_control(ui, state, "").clicked() {
-                                project.set_selected(state != CheckState::All);
+                                for session in &mut project.sessions {
+                                    if session_matches(session, &query, include_archived) {
+                                        session.selected = state != CheckState::All;
+                                    }
+                                }
                                 self.plan = None;
                             }
                             if icon_only_button(
@@ -1379,6 +1431,9 @@ impl MigrationApp {
                 if project.expanded {
                     ui.add_space(4.0);
                     for session in &mut project.sessions {
+                        if !session_matches(session, &query, include_archived) {
+                            continue;
+                        }
                         ui.horizontal(|ui| {
                             ui.add_space(56.0);
                             let mut selected = session.selected;
@@ -1482,7 +1537,7 @@ impl MigrationApp {
                     for (mapped_cwd, threads) in projects {
                         egui::Frame::new()
                             .fill(SURFACE)
-                            .stroke(Stroke::new(1.0, BORDER))
+                            .stroke(Stroke::new(1.0_f32, BORDER))
                             .corner_radius(10.0)
                             .show(ui, |ui| {
                                 egui::Frame::new()
@@ -2320,6 +2375,21 @@ impl eframe::App for MigrationApp {
     }
 }
 
+fn session_matches(session: &UiSession, query: &str, include_archived: bool) -> bool {
+    if session.source.thread.archived && !include_archived {
+        return false;
+    }
+    let query = query.trim().to_lowercase();
+    query.is_empty()
+        || [
+            &session.source.thread.title,
+            &session.source.thread.id,
+            &session.source.thread.cwd,
+        ]
+        .iter()
+        .any(|value| value.to_lowercase().contains(&query))
+}
+
 fn project_to_ui(project: &SourceProject) -> UiProject {
     UiProject {
         original_cwd: project.original_cwd.clone(),
@@ -2332,7 +2402,7 @@ fn project_to_ui(project: &SourceProject) -> UiProject {
             .cloned()
             .map(|source| UiSession {
                 source,
-                selected: true,
+                selected: false,
             })
             .collect(),
     }
@@ -2449,7 +2519,7 @@ fn project_has_path_problem(project: &UiProject) -> bool {
 fn repair_project_row(ui: &mut egui::Ui, project: &mut UiProject, zh: bool) {
     egui::Frame::new()
         .fill(SURFACE)
-        .stroke(Stroke::new(1.0, BORDER))
+        .stroke(Stroke::new(1.0_f32, BORDER))
         .corner_radius(9.0)
         .inner_margin(Margin::symmetric(14, 11))
         .show(ui, |ui| {
@@ -2494,7 +2564,7 @@ fn repair_project_row(ui: &mut egui::Ui, project: &mut UiProject, zh: bool) {
 fn session_selection_card(ui: &mut egui::Ui, project: &mut UiProject, zh: bool) {
     egui::Frame::new()
         .fill(SURFACE)
-        .stroke(Stroke::new(1.0, BORDER))
+        .stroke(Stroke::new(1.0_f32, BORDER))
         .corner_radius(9.0)
         .inner_margin(Margin::symmetric(14, 11))
         .show(ui, |ui| {
@@ -2619,7 +2689,7 @@ fn step(ui: &mut egui::Ui, number: &str, label: &str, completed: bool, active: b
     let color = if completed || active { ACCENT } else { MUTED };
     let (rect, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
     ui.painter()
-        .circle_stroke(rect.center(), 8.0, Stroke::new(1.5, color));
+        .circle_stroke(rect.center(), 8.0, Stroke::new(1.5_f32, color));
     if completed {
         paint_line_icon(ui.painter(), rect.shrink(4.0), LineIcon::Check, color);
     } else {
@@ -2641,14 +2711,14 @@ fn line(ui: &mut egui::Ui, active: bool) {
             painter.clip_rect().left_center(),
             painter.clip_rect().right_center(),
         ],
-        Stroke::new(1.0, if active { ACCENT } else { BORDER }),
+        Stroke::new(1.0_f32, if active { ACCENT } else { BORDER }),
     );
 }
 
 fn card(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
         .fill(SURFACE)
-        .stroke(Stroke::new(1.0, BORDER))
+        .stroke(Stroke::new(1.0_f32, BORDER))
         .corner_radius(10.0)
         .inner_margin(20.0)
         .show(ui, |ui| {
@@ -2755,7 +2825,7 @@ fn check_icon(ui: &mut egui::Ui, state: CheckState) {
     ui.painter().rect_stroke(
         box_rect,
         3.5,
-        Stroke::new(1.4, if active { ACCENT } else { MUTED }),
+        Stroke::new(1.4_f32, if active { ACCENT } else { MUTED }),
         StrokeKind::Inside,
     );
     match state {
@@ -2766,7 +2836,7 @@ fn check_icon(ui: &mut egui::Ui, state: CheckState) {
                     Pos2::new(box_rect.left() + 3.5, box_rect.center().y),
                     Pos2::new(box_rect.right() - 3.5, box_rect.center().y),
                 ],
-                Stroke::new(1.7, Color32::WHITE),
+                Stroke::new(1.7_f32, Color32::WHITE),
             );
         }
         CheckState::All => {
@@ -2817,7 +2887,7 @@ fn secondary_button(ui: &mut egui::Ui, icon: Option<LineIcon>, label: &str) -> e
         rect,
         7.0,
         fill,
-        Stroke::new(1.0, BORDER),
+        Stroke::new(1.0_f32, BORDER),
         StrokeKind::Inside,
     );
     let mut text_x = rect.center().x - galley.size().x / 2.0;
@@ -2854,7 +2924,7 @@ fn status_message(ui: &mut egui::Ui, icon: LineIcon, color: Color32, text: &str)
 }
 
 fn paint_line_icon(painter: &egui::Painter, rect: Rect, icon: LineIcon, color: Color32) {
-    let stroke = Stroke::new(1.5, color);
+    let stroke = Stroke::new(1.5_f32, color);
     let x = |value: f32| rect.left() + rect.width() * value;
     let y = |value: f32| rect.top() + rect.height() * value;
     let point = |x_value: f32, y_value: f32| Pos2::new(x(x_value), y(y_value));
@@ -2963,7 +3033,7 @@ fn paint_line_icon(painter: &egui::Painter, rect: Rect, icon: LineIcon, color: C
 fn sticky_action_bar(ui: &mut egui::Ui, content: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
         .fill(SURFACE)
-        .stroke(Stroke::new(1.0, BORDER))
+        .stroke(Stroke::new(1.0_f32, BORDER))
         .corner_radius(10.0)
         .inner_margin(Margin::symmetric(16, 12))
         .show(ui, |ui| {
@@ -3023,7 +3093,7 @@ fn filled_action(
 fn summary_metric(ui: &mut egui::Ui, label: &str, value: usize) {
     egui::Frame::new()
         .fill(SURFACE)
-        .stroke(Stroke::new(1.0, BORDER))
+        .stroke(Stroke::new(1.0_f32, BORDER))
         .corner_radius(9.0)
         .inner_margin(Margin::symmetric(18, 12))
         .show(ui, |ui| {
@@ -3057,7 +3127,7 @@ fn confirmation(
         .frame(
             egui::Frame::new()
                 .fill(SURFACE)
-                .stroke(Stroke::new(1.0, BORDER))
+                .stroke(Stroke::new(1.0_f32, BORDER))
                 .corner_radius(14.0)
                 .inner_margin(Margin::symmetric(24, 22)),
         )
@@ -3155,7 +3225,7 @@ fn import_success_modal(
         .frame(
             egui::Frame::new()
                 .fill(SURFACE)
-                .stroke(Stroke::new(1.0, BORDER))
+                .stroke(Stroke::new(1.0_f32, BORDER))
                 .corner_radius(14.0)
                 .inner_margin(Margin::symmetric(24, 22)),
         )
@@ -3198,6 +3268,24 @@ fn import_success_modal(
                 summary_metric(ui, tr(zh, "重复跳过", "Duplicates"), summary.skipped);
             });
             ui.add_space(14.0);
+            ui.label(format!("{}: {}", tr(zh, "历史已验证", "History verified"), summary.native_count("ready")));
+            ui.label(format!("{}: {}", tr(zh, "关联记录已保留", "Related records preserved"), summary.native_count("related")));
+            ui.label(format!("{}: {}", tr(zh, "保留归档，待显式打开", "Archive preserved; reopen to verify"), summary.native_count("archived")));
+            ui.label(format!("{}: {} / {}: {}",
+                tr(zh, "历史为空", "Empty history"), summary.native_count("empty"),
+                tr(zh, "需要重试恢复", "Restoration pending"), summary.native_count("pending")));
+            if summary.native_count("pending") > 0 {
+                egui::CollapsingHeader::new(tr(zh, "查看未完成项", "View pending sessions"))
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                            for item in &summary.native_results {
+                                if item.status == "pending" {
+                                    ui.label(format!("{}: {}", short_id(&item.thread_id), item.message));
+                                }
+                            }
+                        });
+                    });
+            }
             egui::Frame::new()
                 .fill(Color32::from_rgb(247, 248, 245))
                 .corner_radius(9.0)
@@ -3219,8 +3307,8 @@ fn import_success_modal(
                     ui.label(
                         RichText::new(tr(
                             zh,
-                            "重新打开 Codex 后即可查看更新后的项目与会话。",
-                            "Reopen Codex to view the updated projects and sessions.",
+                            "重新打开 Codex 查看项目与会话；历史验证结果见上方。重试导入会保留已有记录。",
+                            "Reopen Codex to view sessions. History verification is shown above; repeat import preserves existing records.",
                         ))
                         .size(13.0)
                         .color(TEXT),
@@ -3249,7 +3337,7 @@ fn completion_notice_modal(
         .frame(
             egui::Frame::new()
                 .fill(SURFACE)
-                .stroke(Stroke::new(1.0, BORDER))
+                .stroke(Stroke::new(1.0_f32, BORDER))
                 .corner_radius(14.0)
                 .inner_margin(Margin::symmetric(24, 22)),
         )
@@ -3494,6 +3582,32 @@ mod tests {
     }
 
     #[test]
+    fn search_matches_title_uuid_path_and_respects_archive_filter() {
+        let mut item = session("search-id");
+        item.source.thread.title = "原标题 Search".to_owned();
+        assert!(session_matches(&item, "原标题", false));
+        assert!(session_matches(&item, "SEARCH", false));
+        assert!(session_matches(&item, "search-id", false));
+        assert!(session_matches(&item, "/old/project", false));
+        assert!(!session_matches(&item, "unrelated", false));
+        item.source.thread.archived = true;
+        assert!(!session_matches(&item, "原标题", false));
+        assert!(session_matches(&item, "原标题", true));
+    }
+
+    #[test]
+    fn scanned_import_requires_explicit_session_selection() {
+        let source = SourceProject {
+            original_cwd: "/old/project".to_owned(),
+            suggested_target: None,
+            sessions: vec![session("one").source, session("two").source],
+        };
+        let project = project_to_ui(&source);
+        assert_eq!(project.selected_count(), 0);
+        assert!(selected_ids(&[project]).is_empty());
+    }
+
+    #[test]
     fn html_selection_defaults_to_none_and_supports_select_all() {
         let mut projects = vec![UiProject {
             original_cwd: "/project".to_owned(),
@@ -3525,6 +3639,7 @@ mod tests {
                     thread_source: Some("user".to_owned()),
                     model_provider: "openai".to_owned(),
                     cli_version: String::new(),
+                    history_mode: None,
                     archived: false,
                     archive_path: format!("sessions/{id}.jsonl"),
                     sha256: String::new(),

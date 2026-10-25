@@ -130,12 +130,13 @@ pub fn run(cli: Cli) -> Result<()> {
                     &args.source,
                     args.codex_home.as_deref(),
                     &options,
-                    |_| {},
+                    |message| eprintln!("{message}"),
                 )?;
                 println!(
                     "import completed; transaction id: {}",
                     summary.transaction_id
                 );
+                println!("{}", serde_json::to_string_pretty(&summary)?);
             }
         }
         Commands::Rebind(args) => {
