@@ -215,6 +215,9 @@ fn update_thread(
         },
     );
     add("cli_version", Value::Text(thread.cli_version.clone()));
+    if let Some(mode) = &thread.history_mode {
+        add("history_mode", Value::Text(mode.clone()));
+    }
     add(
         "first_user_message",
         Value::Text(thread.first_user_message.clone()),
@@ -320,6 +323,9 @@ fn insert_thread(
         },
     );
     add("cli_version", Value::Text(thread.cli_version.clone()));
+    if let Some(mode) = &thread.history_mode {
+        add("history_mode", Value::Text(mode.clone()));
+    }
     add(
         "first_user_message",
         Value::Text(thread.first_user_message.clone()),

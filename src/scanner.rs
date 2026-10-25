@@ -104,6 +104,7 @@ fn scan_rollout(
     let mut thread_source = None;
     let mut provider = None;
     let mut cli_version = None;
+    let mut history_mode = None;
     let mut title = None;
     let mut first_user_message = None;
 
@@ -115,6 +116,7 @@ fn scan_rollout(
         match value.get("type").and_then(Value::as_str) {
             Some("session_meta") => {
                 let payload = &value["payload"];
+                history_mode = payload.get("history_mode").and_then(Value::as_str).map(str::to_owned);
                 id = payload.get("id").and_then(Value::as_str).map(str::to_owned);
                 cwd = payload
                     .get("cwd")
@@ -194,6 +196,7 @@ fn scan_rollout(
 
     let record = ThreadRecord {
         id,
+        history_mode,
         title: metadata
             .and_then(|value| value.name.clone())
             .filter(|value| !value.trim().is_empty())

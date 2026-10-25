@@ -23,6 +23,8 @@ pub struct ThreadRecord {
     pub thread_source: Option<String>,
     pub model_provider: String,
     pub cli_version: String,
+    #[serde(default)]
+    pub history_mode: Option<String>,
     pub archived: bool,
     pub archive_path: String,
     pub sha256: String,

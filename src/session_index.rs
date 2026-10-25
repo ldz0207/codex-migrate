@@ -134,6 +134,7 @@ mod tests {
                 thread_source: Some("user".to_owned()),
                 model_provider: "openai".to_owned(),
                 cli_version: String::new(),
+                history_mode: None,
                 archived: false,
                 archive_path: "sessions/test.jsonl".to_owned(),
                 sha256: String::new(),

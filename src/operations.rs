@@ -453,6 +453,15 @@ fn execute_import(
     )?;
     if let Some(state_db) = environment.state_db.as_deref() {
         transaction.backup_sqlite_family(state_db)?;
+        let history_db = state_db.with_file_name("thread_history_1.sqlite");
+        if history_db.is_file() {
+            transaction.backup_sqlite_family(&history_db)?;
+        } else {
+            transaction.note_created(&history_db)?;
+            for suffix in ["-wal", "-shm"] {
+                transaction.note_created(&PathBuf::from(format!("{}{suffix}", history_db.display())))?;
+            }
+        }
     }
     // Native naming can update the sidecar before the final index sync.
     let index_path = session_index::path(&environment.codex_home);
