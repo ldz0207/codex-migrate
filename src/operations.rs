@@ -626,7 +626,6 @@ fn execute_import(
             native_results.push(verify_native_thread(
                 &environment,
                 &planned.thread,
-                Path::new(&planned.target_path),
                 Path::new(&planned.mapped_cwd),
             ));
         }
@@ -683,7 +682,6 @@ fn index_thread(
 fn verify_native_thread(
     environment: &Environment,
     thread: &crate::model::ThreadRecord,
-    rollout_path: &Path,
     cwd: &Path,
 ) -> NativeVerification {
     if thread.is_auxiliary() {
@@ -701,7 +699,6 @@ fn verify_native_thread(
             app_server::register_thread(
                 codex,
                 &environment.codex_home,
-                rollout_path,
                 &thread.id,
                 cwd,
                 &thread.title,

@@ -9,7 +9,6 @@ use std::time::{Duration, Instant};
 pub fn register_thread(
     codex: &Path,
     codex_home: &Path,
-    rollout_path: &Path,
     thread_id: &str,
     cwd: &Path,
     expected_name: &str,
@@ -41,7 +40,6 @@ pub fn register_thread(
     let result = restore_protocol(
         &mut stdin,
         &receiver,
-        rollout_path,
         thread_id,
         cwd,
         expected_name,
@@ -55,7 +53,6 @@ pub fn register_thread(
 fn restore_protocol(
     stdin: &mut impl Write,
     receiver: &mpsc::Receiver<Value>,
-    rollout_path: &Path,
     thread_id: &str,
     cwd: &Path,
     expected_name: &str,
@@ -105,7 +102,6 @@ fn restore_protocol(
             "id": 3,
             "params": {
                 "threadId": thread_id,
-                "path": rollout_path.to_string_lossy(),
                 "cwd": cwd.to_string_lossy(),
                 "excludeTurns": true
             }
@@ -224,7 +220,6 @@ mod tests {
         let result = restore_protocol(
             &mut bytes,
             &receiver,
-            Path::new("/rollout.jsonl"),
             "test-id",
             Path::new("/mapped"),
             "原标题",
@@ -242,6 +237,8 @@ mod tests {
     fn restores_title_and_verifies_history_without_starting_a_turn() {
         let (result, requests) = fixture(None, "原标题", json!([{"id":"old-turn"}]), false);
         assert!(result.unwrap());
+        assert!(requests.iter().filter(|request| request["method"] == "thread/resume")
+            .all(|request| request["params"].get("path").is_none()));
         assert!(requests
             .iter()
             .any(|request| request["method"] == "thread/name/set"
