@@ -237,7 +237,9 @@ mod tests {
     fn restores_title_and_verifies_history_without_starting_a_turn() {
         let (result, requests) = fixture(None, "原标题", json!([{"id":"old-turn"}]), false);
         assert!(result.unwrap());
-        assert!(requests.iter().filter(|request| request["method"] == "thread/resume")
+        assert!(requests
+            .iter()
+            .filter(|request| request["method"] == "thread/resume")
             .all(|request| request["params"].get("path").is_none()));
         assert!(requests
             .iter()
