@@ -56,13 +56,21 @@ function Invoke-CodexNativeRestore {
     $info.StandardOutputEncoding = [Text.Encoding]::UTF8; $info.StandardErrorEncoding = [Text.Encoding]::UTF8
     $info.EnvironmentVariables['CODEX_HOME'] = [IO.Path]::GetFullPath($CodexHome)
     $process = New-Object Diagnostics.Process; $process.StartInfo = $info
-    [void]$process.Start(); $stderr = $process.StandardError.ReadToEndAsync()
+    # .NET Framework derives the redirected stdin writer from Console.InputEncoding.
+    # Some UTF-8 consoles otherwise emit a BOM before the first JSON-RPC request.
+    $previousInputEncoding = [Console]::InputEncoding
+    try {
+        [Console]::InputEncoding = New-Object Text.UTF8Encoding($false)
+        [void]$process.Start()
+        $inputStream = $process.StandardInput.BaseStream
+    } finally { [Console]::InputEncoding = $previousInputEncoding }
+    $stderr = $process.StandardError.ReadToEndAsync()
     function Invoke-Rpc([string]$Method, $Parameters) {
         $id = [Guid]::NewGuid().ToString('N')
         $request = @{id=$id;method=$Method;params=$Parameters} | ConvertTo-Json -Depth 12 -Compress
         # PS 5.1 may give the StreamWriter a legacy console encoding. RPC is UTF-8.
         $bytes = [Text.Encoding]::UTF8.GetBytes($request + "`n")
-        $process.StandardInput.BaseStream.Write($bytes,0,$bytes.Length); $process.StandardInput.BaseStream.Flush()
+        $inputStream.Write($bytes,0,$bytes.Length); $inputStream.Flush()
         $watch = [Diagnostics.Stopwatch]::StartNew()
         while ($watch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
             $read = $process.StandardOutput.ReadLineAsync()
@@ -81,7 +89,7 @@ function Invoke-CodexNativeRestore {
         $initialized = Invoke-Rpc 'initialize' @{clientInfo=@{name='codex_migrate_native_restore';version='1.0'};capabilities=@{experimentalApi=$true}}
         if ($initialized.codexHome -and [IO.Path]::GetFullPath($initialized.codexHome).TrimEnd('\') -ne [IO.Path]::GetFullPath($CodexHome).TrimEnd('\')) { throw 'Backend Codex home differs from the selected target.' }
         $bytes = [Text.Encoding]::UTF8.GetBytes('{"method":"initialized","params":{}}' + "`n")
-        $process.StandardInput.BaseStream.Write($bytes,0,$bytes.Length); $process.StandardInput.BaseStream.Flush()
+        $inputStream.Write($bytes,0,$bytes.Length); $inputStream.Flush()
         $before = Invoke-Rpc 'thread/read' @{threadId=$ThreadId;includeTurns=$false}
         if ($before.thread.status.type -eq 'active') { throw 'Thread is active. Its files were retained; retry native restoration when it is idle.' }
         $parameters = @{threadId=$ThreadId;excludeTurns=$true}

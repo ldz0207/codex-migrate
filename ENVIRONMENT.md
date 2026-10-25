@@ -15,7 +15,7 @@ Local verification on 2026-10-25:
 - Windows PowerShell: 5.1.26100.9711.
 - Python test runner: 3.11.9, standard library only.
 - Installed Codex used for isolated native restoration: 0.164.0-alpha.11.1.
-- Fifteen subprocess protocol tests passed on Windows.
+- Sixteen subprocess protocol tests passed on Windows.
 - A private isolated integration run verified native title/history restoration,
   explicit working-directory mapping, and reopening a compressed archived record.
   Real session fixtures and output are excluded from this repository.

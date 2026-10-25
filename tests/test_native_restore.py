@@ -17,7 +17,7 @@ POWERSHELL = shutil.which('powershell.exe')
 
 @unittest.skipUnless(POWERSHELL, 'Windows PowerShell 5.1 is required')
 class NativeRestoreTests(unittest.TestCase):
-    def invoke(self, mode='normal', cwd='', unarchive=False, thread_id='11111111-1111-1111-1111-111111111111', name='Restored title', unsafe_home=False):
+    def invoke(self, mode='normal', cwd='', unarchive=False, thread_id='11111111-1111-1111-1111-111111111111', name='Restored title', unsafe_home=False, bom_input=False):
         with tempfile.TemporaryDirectory(prefix='native restore ') as folder:
             home = Path(folder)
             log = home / 'rpc.jsonl'
@@ -27,6 +27,7 @@ class NativeRestoreTests(unittest.TestCase):
                 'TEST_CWD': str(home) if cwd == 'valid' else cwd,
                 'TEST_ALLOW_UNARCHIVE': '1' if unarchive else '0',
                 'TEST_DIAGNOSTIC_PATH': str(home / 'fixture.stderr.log'),
+                'TEST_BOM_INPUT': '1' if bom_input else '0',
             }
             if unsafe_home:
                 env['TEST_CODEX_HOME'] = os.environ['USERPROFILE']
@@ -69,6 +70,11 @@ class NativeRestoreTests(unittest.TestCase):
         proc, result, _ = self.invoke(name='搬家后的科研对话')
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(result['name'], '搬家后的科研对话')
+
+    def test_utf8_console_does_not_prefix_rpc_with_bom(self):
+        proc, result, _ = self.invoke(bom_input=True)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertTrue(result['historyVerified'])
 
     def test_archive_is_preserved_by_default(self):
         proc, result, requests = self.invoke('archived')
