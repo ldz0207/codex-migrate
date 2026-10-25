@@ -6,6 +6,8 @@ The project uses semantic versioning where practical.
 
 ## [Unreleased]
 
+- Make GUI stroke widths explicit f32 literals for newer Rust compilers.
+
 - Add an optional PowerShell 5.1+ native-restoration adapter for already-copied
   Windows sessions, with UTF-8 RPC, missing-title restoration, history-page
   verification, archive preservation, explicit working-directory changes, and

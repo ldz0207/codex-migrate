@@ -26,6 +26,7 @@ class NativeRestoreTests(unittest.TestCase):
                 'TEST_THREAD_ID': thread_id, 'TEST_THREAD_NAME': name,
                 'TEST_CWD': str(home) if cwd == 'valid' else cwd,
                 'TEST_ALLOW_UNARCHIVE': '1' if unarchive else '0',
+                'TEST_DIAGNOSTIC_PATH': str(home / 'fixture.stderr.log'),
             }
             if unsafe_home:
                 env['TEST_CODEX_HOME'] = os.environ['USERPROFILE']
@@ -37,6 +38,9 @@ class NativeRestoreTests(unittest.TestCase):
                 '-ServerScript', str(ROOT / 'tests/fake_native_app_server.py'),
             ], env=env, capture_output=True, timeout=20)
             requests = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
+            diagnostics = home / 'fixture.stderr.log'
+            if proc.returncode != 0 and diagnostics.exists():
+                proc.stderr += diagnostics.read_bytes()
             text = proc.stdout.decode('utf-8-sig', errors='replace')
             result = json.loads(text) if proc.returncode == 0 else None
             methods = [r['method'] for r in requests]

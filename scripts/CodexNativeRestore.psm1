@@ -35,6 +35,7 @@ function Invoke-CodexNativeRestore {
         [string]$ExpectedName = '',
         [string]$Cwd = '',
         [string]$CodexExecutable = '',
+        [string]$DiagnosticPath = '',
         [string[]]$StartupArguments = @('app-server'),
         [ValidateRange(1,120)][int]$TimeoutSeconds = 30,
         [switch]$AllowUnarchive
@@ -122,6 +123,9 @@ function Invoke-CodexNativeRestore {
     } finally {
         $process.StandardInput.Close()
         if (!$process.WaitForExit(3000)) { $process.Kill(); $process.WaitForExit() }
+        if ($DiagnosticPath) {
+            [IO.File]::WriteAllText([IO.Path]::GetFullPath($DiagnosticPath),$stderr.GetAwaiter().GetResult(),(New-Object Text.UTF8Encoding($false)))
+        }
         $process.Dispose()
     }
 }

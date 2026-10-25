@@ -2,7 +2,8 @@
 
 The upstream Rust application is version 1.0.8. Its dependencies and resolved
 versions remain defined by `Cargo.toml` and `Cargo.lock`; see the main README for
-the Rust/GUI build requirements. This change does not modify Rust source files.
+the Rust/GUI build requirements. GUI stroke widths use explicit f32 literals to
+avoid newer compiler fallback errors; the migration engine is unchanged.
 
 The optional Windows native-restoration adapter has no third-party PowerShell
 or Python package dependencies. End users need Windows PowerShell 5.1+ and an
@@ -18,7 +19,7 @@ Local verification on 2026-10-25:
 - A private isolated integration run verified native title/history restoration,
   explicit working-directory mapping, and reopening a compressed archived record.
   Real session fixtures and output are excluded from this repository.
-- No Rust toolchain was available locally; the unchanged Rust application was
+- No Rust toolchain was available locally; the Rust application was
   not rebuilt in this run. Existing Rust CI and a new Windows protocol test job
   provide separate checks.
 - Desktop visibility is a separate user acceptance step, never inferred from

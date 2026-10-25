@@ -63,3 +63,7 @@ not read real conversations or use a model/API key. Test dependencies are Python
 requires PowerShell and a compatible installed Codex executable.
 
 Protocol reference: [Codex app-server](https://learn.chatgpt.com/docs/app-server).
+
+Module callers may explicitly supply `-DiagnosticPath` to save backend stderr to
+a private local file during troubleshooting. No diagnostic log is written by
+default; do not publish logs from a real Codex home.
