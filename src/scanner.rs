@@ -1,17 +1,19 @@
 use crate::model::{ScannedThread, ThreadRecord};
+use crate::{rollout, session_index};
 use crate::sqlite_adapter;
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 use walkdir::WalkDir;
 
 #[derive(Debug, Default)]
 struct DbMetadata {
+    name: Option<String>,
+    archived: Option<bool>,
     title: String,
     created_at: i64,
     updated_at: i64,
@@ -28,10 +30,18 @@ struct DbMetadata {
 }
 
 pub fn scan_codex_home(home: &Path, state_db: Option<&Path>) -> Result<Vec<ScannedThread>> {
-    let db_metadata = state_db
+    let mut db_metadata = state_db
         .map(load_db_metadata)
         .transpose()?
         .unwrap_or_default();
+    for (id, entry) in session_index::load(home)? {
+        if let Some(name) = entry.get("thread_name").and_then(Value::as_str) {
+            let metadata = db_metadata.entry(id).or_default();
+            if metadata.name.as_deref().is_none_or(|value| value.trim().is_empty()) {
+                metadata.name = Some(name.to_owned());
+            }
+        }
+    }
     let mut result = Vec::new();
     scan_directory(&home.join("sessions"), false, &db_metadata, &mut result)?;
     scan_directory(
@@ -64,7 +74,7 @@ fn scan_directory(
             continue;
         }
         let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+        if !rollout::is_rollout(path) {
             continue;
         }
         output.push(scan_rollout(path, root, archived, db_metadata)?);
@@ -78,7 +88,7 @@ fn scan_rollout(
     archived: bool,
     db_metadata: &HashMap<String, DbMetadata>,
 ) -> Result<ScannedThread> {
-    let content = fs::read(path).with_context(|| format!("read rollout {}", path.display()))?;
+    let content = rollout::read(path)?;
     if content.is_empty() {
         return Err(anyhow!("empty rollout: {}", path.display()));
     }
@@ -156,8 +166,8 @@ fn scan_rollout(
         }
     }
 
-    let id = id
-        .or_else(|| id_from_filename(path))
+    let id = id_from_filename(path)
+        .or(id)
         .ok_or_else(|| anyhow!("cannot determine thread id for {}", path.display()))?;
     let metadata = db_metadata.get(&id);
     let sha256 = hex::encode(Sha256::digest(&content));
@@ -166,6 +176,7 @@ fn scan_rollout(
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/");
+    let relative = relative.strip_suffix(".zst").unwrap_or(&relative);
     let archive_path = if archived {
         format!("archived_sessions/{relative}")
     } else {
@@ -175,17 +186,19 @@ fn scan_rollout(
     let record = ThreadRecord {
         id,
         title: metadata
-            .map(|value| value.title.clone())
+            .and_then(|value| value.name.clone())
+            .filter(|value| !value.trim().is_empty())
+            .or_else(|| title.filter(|value| !value.trim().is_empty()))
+            .or_else(|| metadata.map(|value| value.title.clone()))
             .filter(|value| !value.is_empty())
-            .or_else(|| title.filter(|value| !value.is_empty()))
             .or_else(|| first_user_message.as_deref().map(summarize_title))
             .unwrap_or_default(),
         created_at: metadata
-            .map(|value| value.created_at)
+            .map(|value| value.created_at).filter(|value| *value > 0)
             .or(timestamp)
             .unwrap_or_default(),
         updated_at: metadata
-            .map(|value| value.updated_at)
+            .map(|value| value.updated_at).filter(|value| *value > 0)
             .or(timestamp)
             .unwrap_or_default(),
         cwd: cwd
@@ -202,7 +215,7 @@ fn scan_rollout(
         cli_version: cli_version
             .or_else(|| metadata.map(|value| value.cli_version.clone()))
             .unwrap_or_default(),
-        archived,
+        archived: metadata.and_then(|value| value.archived).unwrap_or(archived),
         archive_path,
         sha256,
         byte_len: content.len() as u64,
@@ -246,7 +259,7 @@ fn load_db_metadata(path: &Path) -> Result<HashMap<String, DbMetadata>> {
     };
     let sql = format!(
         "SELECT id, title, created_at, updated_at, cwd, source, model_provider, \
-         {}, {}, {}, {}, {}, {}, {} FROM threads",
+         {}, {}, {}, {}, {}, {}, {}, {}, {} FROM threads",
         optional("cli_version", "''"),
         optional("first_user_message", "''"),
         optional("sandbox_policy", "NULL"),
@@ -254,6 +267,8 @@ fn load_db_metadata(path: &Path) -> Result<HashMap<String, DbMetadata>> {
         optional("model", "NULL"),
         optional("reasoning_effort", "NULL"),
         optional("thread_source", "NULL"),
+        optional("name", "NULL"),
+        optional("archived", "NULL"),
     );
     let mut statement = connection.prepare(&sql)?;
     let rows = statement.query_map([], |row| {
@@ -273,6 +288,8 @@ fn load_db_metadata(path: &Path) -> Result<HashMap<String, DbMetadata>> {
                 model: row.get(11)?,
                 reasoning_effort: row.get(12)?,
                 thread_source: row.get(13)?,
+                name: row.get(14)?,
+                archived: row.get(15)?,
             },
         ))
     })?;
@@ -298,12 +315,10 @@ fn parse_timestamp(value: &str) -> Option<i64> {
 }
 
 fn id_from_filename(path: &Path) -> Option<String> {
-    let stem = path.file_stem()?.to_str()?;
-    let suffix = stem.rsplit('-').take(5).collect::<Vec<_>>();
-    if suffix.len() != 5 {
-        return None;
-    }
-    Some(suffix.into_iter().rev().collect::<Vec<_>>().join("-"))
+    let name = path.file_name()?.to_str()?;
+    let stem = name.strip_suffix(".zst").unwrap_or(name).strip_suffix(".jsonl")?;
+    let suffix = stem.get(stem.len().checked_sub(36)?..)?;
+    uuid::Uuid::parse_str(suffix).ok().map(|id| id.to_string())
 }
 
 fn extract_message_text(payload: &Value) -> Option<String> {

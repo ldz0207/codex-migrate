@@ -2332,7 +2332,7 @@ fn project_to_ui(project: &SourceProject) -> UiProject {
             .cloned()
             .map(|source| UiSession {
                 source,
-                selected: true,
+                selected: false,
             })
             .collect(),
     }
@@ -3198,6 +3198,23 @@ fn import_success_modal(
                 summary_metric(ui, tr(zh, "重复跳过", "Duplicates"), summary.skipped);
             });
             ui.add_space(14.0);
+            ui.label(format!("{}: {}", tr(zh, "历史已验证", "History verified"), summary.native_count("ready")));
+            ui.label(format!("{}: {}", tr(zh, "保留归档，待显式打开", "Archive preserved; reopen to verify"), summary.native_count("archived")));
+            ui.label(format!("{}: {} / {}: {}",
+                tr(zh, "历史为空", "Empty history"), summary.native_count("empty"),
+                tr(zh, "需要重试恢复", "Restoration pending"), summary.native_count("pending")));
+            if summary.native_count("pending") > 0 {
+                egui::CollapsingHeader::new(tr(zh, "查看未完成项", "View pending sessions"))
+                    .show(ui, |ui| {
+                        egui::ScrollArea::vertical().max_height(140.0).show(ui, |ui| {
+                            for item in &summary.native_results {
+                                if item.status == "pending" {
+                                    ui.label(format!("{}: {}", short_id(&item.thread_id), item.message));
+                                }
+                            }
+                        });
+                    });
+            }
             egui::Frame::new()
                 .fill(Color32::from_rgb(247, 248, 245))
                 .corner_radius(9.0)
@@ -3219,8 +3236,8 @@ fn import_success_modal(
                     ui.label(
                         RichText::new(tr(
                             zh,
-                            "重新打开 Codex 后即可查看更新后的项目与会话。",
-                            "Reopen Codex to view the updated projects and sessions.",
+                            "重新打开 Codex 查看项目与会话；历史验证结果见上方。重试导入会保留已有记录。",
+                            "Reopen Codex to view sessions. History verification is shown above; repeat import preserves existing records.",
                         ))
                         .size(13.0)
                         .color(TEXT),

@@ -136,6 +136,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     "import completed; transaction id: {}",
                     summary.transaction_id
                 );
+                println!("{}", serde_json::to_string_pretty(&summary)?);
             }
         }
         Commands::Rebind(args) => {

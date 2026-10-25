@@ -35,6 +35,20 @@ pub struct ImportSummary {
     pub imported: usize,
     pub refreshed: usize,
     pub skipped: usize,
+    pub native_results: Vec<NativeVerification>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NativeVerification {
+    pub thread_id: String,
+    pub status: String,
+    pub message: String,
+}
+
+impl ImportSummary {
+    pub fn native_count(&self, status: &str) -> usize {
+        self.native_results.iter().filter(|item| item.status == status).count()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,10 +74,34 @@ pub fn resolve_codex_root(selected: &Path) -> Result<PathBuf> {
     if is_codex_root(selected) {
         return Ok(selected.to_path_buf());
     }
-    let candidates = ["Codex_backup", "Codex", ".codex"]
+    let pointer_path = selected.join("current.json");
+    if pointer_path.is_file() {
+        let pointer: serde_json::Value = serde_json::from_slice(&fs::read(&pointer_path)?)?;
+        let relative = pointer["snapshot"].as_str()
+            .ok_or_else(|| anyhow!("snapshot pointer has no snapshot path"))?;
+        let snapshot = selected.join(relative).canonicalize()?;
+        if !snapshot.starts_with(selected.canonicalize()?) || snapshot == selected.canonicalize()? {
+            anyhow::bail!("snapshot pointer must stay inside the selected data folder");
+        }
+        let complete: serde_json::Value = serde_json::from_slice(&fs::read(snapshot.join("COMPLETE.json"))?)?;
+        let manifest = fs::read(snapshot.join("manifest.json"))?;
+        let actual_hash = hex::encode(Sha256::digest(&manifest));
+        if !complete["manifest_sha256"].as_str().is_some_and(|hash| hash.eq_ignore_ascii_case(&actual_hash)) {
+            anyhow::bail!("snapshot manifest checksum mismatch");
+        }
+        let root = snapshot.join("codex");
+        if !is_codex_root(&root) {
+            anyhow::bail!("snapshot contains no Codex sessions");
+        }
+        return Ok(root);
+    }
+    let candidates = ["Codex_backup", "Codex", "codex", ".codex"]
         .into_iter()
         .map(|name| selected.join(name))
         .filter(|path| is_codex_root(path))
+        .map(|path| path.canonicalize())
+        .collect::<std::io::Result<std::collections::BTreeSet<_>>>()?
+        .into_iter()
         .collect::<Vec<_>>();
     match candidates.as_slice() {
         [only] => Ok(only.clone()),
@@ -408,6 +446,13 @@ fn execute_import(
     if let Some(state_db) = environment.state_db.as_deref() {
         transaction.backup_sqlite_family(state_db)?;
     }
+    // Native naming can update the sidecar before the final index sync.
+    let index_path = session_index::path(&environment.codex_home);
+    if index_path.exists() {
+        transaction.backup_replaced(&index_path)?;
+    } else {
+        transaction.note_created(&index_path)?;
+    }
 
     let result = (|| {
         let staging = transaction.root.join("staging");
@@ -430,6 +475,7 @@ fn execute_import(
         let mut imported = 0;
         let mut refreshed_count = 0;
         let mut skipped = 0;
+        let mut native_results = Vec::new();
         for planned in &plan.threads {
             let target = PathBuf::from(&planned.target_path);
             let mapped_cwd = PathBuf::from(&planned.mapped_cwd);
@@ -444,13 +490,13 @@ fn execute_import(
                         }
                     ));
                     fs::create_dir_all(&mapped_cwd)?;
-                    let existing_bytes = fs::read(&target)?;
+                    let existing_bytes = rollout::read(&target)?;
                     let (_, changed) = rollout::rewrite_cwd_bytes(&existing_bytes, &mapped_cwd)?;
+                    transaction.backup_replaced(&target)?;
                     if changed > 0 {
-                        transaction.backup_replaced(&target)?;
                         rollout::rewrite_cwd_file(&target, &mapped_cwd)?;
                     }
-                    register_and_index(&environment, &planned.thread, &target, &mapped_cwd)?;
+                    native_results.push(register_and_index(&environment, &planned.thread, &target, &mapped_cwd)?);
                     indexed_ids.push(planned.thread.id.clone());
                     refreshed_count += 1;
                     skipped += 1;
@@ -485,7 +531,7 @@ fn execute_import(
                 transaction.note_created(&target)?;
             }
             let staged = staging.join(&planned.thread.id);
-            fs::write(&staged, bytes)?;
+            fs::write(&staged, rollout::encode_for_path(&target, &bytes)?)?;
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
@@ -497,18 +543,12 @@ fn execute_import(
                 fs::remove_file(&staged)
             })?;
             fs::create_dir_all(&mapped_cwd)?;
-            register_and_index(&environment, &planned.thread, &target, &mapped_cwd)?;
+            native_results.push(register_and_index(&environment, &planned.thread, &target, &mapped_cwd)?);
             indexed_ids.push(planned.thread.id.clone());
             imported += 1;
         }
         if !plan.threads.is_empty() {
             progress("Synchronizing Codex session index".to_owned());
-            let index_path = session_index::path(&environment.codex_home);
-            if index_path.exists() {
-                transaction.backup_replaced(&index_path)?;
-            } else {
-                transaction.note_created(&index_path)?;
-            }
             let promoted =
                 session_index::sync_imported(&environment.codex_home, source_root, &plan.threads)?;
             if let Some(state_db) = environment.state_db.as_deref() {
@@ -558,10 +598,10 @@ fn execute_import(
             }
         }
         let _ = validator::run_codex_doctor(&refreshed);
-        Ok((imported, refreshed_count, skipped))
+        Ok((imported, refreshed_count, skipped, native_results))
     })();
 
-    let (imported, refreshed, skipped) = match result {
+    let (imported, refreshed, skipped, native_results) = match result {
         Ok(result) => result,
         Err(error) => {
             progress("Import failed; restoring rollback snapshot".to_owned());
@@ -574,14 +614,18 @@ fn execute_import(
             return Err(error.context("import failed and was rolled back"));
         }
     };
-    transaction.complete()?;
-    progress("Import completed".to_owned());
-    Ok(ImportSummary {
-        transaction_id: transaction.record.id,
+    let summary = ImportSummary {
+        transaction_id: transaction.record.id.clone(),
         imported,
         refreshed,
         skipped,
-    })
+        native_results,
+    };
+    fs::write(transaction.root.join("import-result.json"), serde_json::to_vec_pretty(&summary)?)?;
+    transaction.complete()?;
+    progress(format!("Files imported; native history verified for {} session(s), pending {}",
+        summary.native_count("ready"), summary.native_count("pending")));
+    Ok(summary)
 }
 
 fn register_and_index(
@@ -589,7 +633,10 @@ fn register_and_index(
     thread: &crate::model::ThreadRecord,
     rollout_path: &Path,
     cwd: &Path,
-) -> Result<()> {
+) -> Result<NativeVerification> {
+    let state_db = environment.state_db.as_deref()
+        .ok_or_else(|| anyhow!("state database was not found"))?;
+    sqlite_adapter::upsert_thread(state_db, thread, rollout_path, cwd)?;
     let app_server_result = environment
         .codex_executable
         .as_deref()
@@ -601,20 +648,17 @@ fn register_and_index(
                 rollout_path,
                 &thread.id,
                 cwd,
+                &thread.title,
+                thread.archived,
             )
         });
-    let refreshed = discovery::discover(Some(&environment.codex_home))?;
-    let state_db = refreshed
-        .state_db
-        .as_deref()
-        .ok_or_else(|| anyhow!("state database was not found"))?;
-    if let Err(error) = app_server_result {
-        eprintln!(
-            "warning: App Server registration failed for {}; using SQLite fallback: {error:#}",
-            thread.id
-        );
-    }
-    sqlite_adapter::upsert_thread(state_db, thread, rollout_path, cwd)
+    let (status, message) = match app_server_result {
+        Ok(true) => ("ready", "UUID, name, working directory and historical page verified".to_owned()),
+        Ok(false) if thread.archived => ("archived", "Archive preserved; history verification deferred until explicit reopen".to_owned()),
+        Ok(false) => ("empty", "Codex returned an empty history page".to_owned()),
+        Err(error) => ("pending", format!("Files and index imported; native restoration needs retry: {error:#}")),
+    };
+    Ok(NativeVerification { thread_id: thread.id.clone(), status:status.to_owned(), message })
 }
 
 fn ensure_state_database(environment: &Environment) -> Result<Environment> {

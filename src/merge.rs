@@ -6,7 +6,7 @@ use crate::path_mapper::{history_only_path, map_explicit, normalize};
 use crate::rollout;
 use crate::scanner;
 use anyhow::{anyhow, Result};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 pub fn build_plan(
@@ -27,7 +27,8 @@ pub fn build_plan(
         .collect::<HashMap<_, _>>();
     let mut threads = Vec::new();
 
-    for thread_id in &options.selected_thread_ids {
+    let selected = expand_selection(source_threads, &options.selected_thread_ids)?;
+    for thread_id in &selected {
         let source_thread = source
             .get(thread_id)
             .ok_or_else(|| anyhow!("selected thread does not exist in source: {thread_id}"))?;
@@ -47,7 +48,7 @@ pub fn build_plan(
                 })
                 .ok_or_else(|| anyhow!("selected project is not mapped: {original_cwd}"))?
         };
-        let (action, reason) = match existing.get(thread_id) {
+        let (action, mut reason) = match existing.get(thread_id) {
             None => (MergeAction::Import, "thread UUID is not present".to_owned()),
             Some(target) if target.record.sha256 == source_thread.record.sha256 => (
                 MergeAction::SkipIdentical,
@@ -63,8 +64,19 @@ pub fn build_plan(
                 .codex_home
                 .join(&source_thread.record.archive_path),
         };
+        if !options.selected_thread_ids.contains(thread_id) {
+            reason = format!("Required related session; {reason}");
+        }
+        let mut record = source_thread.record.clone();
+        if let Some(target) = existing.get(thread_id) {
+            // Preserve choices already made on the destination device.
+            record.archived = target.record.archived;
+            if !target.record.title.trim().is_empty() {
+                record.title = target.record.title.clone();
+            }
+        }
         threads.push(PlannedThread {
-            thread: source_thread.record.clone(),
+            thread: record,
             source_path: source_thread.source_path.to_string_lossy().into_owned(),
             mapped_cwd: mapped_cwd.to_string_lossy().into_owned(),
             history_only,
@@ -89,6 +101,61 @@ pub fn build_plan(
         threads,
         conflicts,
     })
+}
+
+fn related_ids(thread: &ScannedThread) -> BTreeSet<String> {
+    let mut ids = BTreeSet::new();
+    for line in thread.content.split(|byte| *byte == b'\n') {
+        let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else {
+            continue;
+        };
+        if value["type"] != "session_meta" {
+            continue;
+        }
+        let payload = &value["payload"];
+        for key in ["id", "forked_from_id", "forked_from_thread_id", "parent_thread_id"] {
+            if let Some(id) = payload[key].as_str() {
+                if id != thread.record.id {
+                    ids.insert(id.to_owned());
+                }
+            }
+        }
+        for key in ["source", "thread_source"] {
+            let source = payload[key].as_str()
+                .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+                .unwrap_or_else(|| payload[key].clone());
+            if let Some(id) = source.pointer("/subagent/thread_spawn/parent_thread_id")
+                .and_then(serde_json::Value::as_str) {
+                ids.insert(id.to_owned());
+            }
+        }
+        break;
+    }
+    ids
+}
+
+fn expand_selection(threads: &[ScannedThread], selected: &BTreeSet<String>) -> Result<BTreeSet<String>> {
+    let known = threads.iter().map(|thread| thread.record.id.clone()).collect::<BTreeSet<_>>();
+    let mut graph: HashMap<String, BTreeSet<String>> = HashMap::new();
+    for thread in threads {
+        for related in related_ids(thread) {
+            graph.entry(thread.record.id.clone()).or_default().insert(related.clone());
+            graph.entry(related).or_default().insert(thread.record.id.clone());
+        }
+    }
+    let mut result = selected.clone();
+    let mut pending = selected.iter().cloned().collect::<Vec<_>>();
+    while let Some(id) = pending.pop() {
+        if !known.contains(&id) {
+            return Err(anyhow!("required related session is missing from source: {id}"));
+        }
+        for related in graph.get(&id).into_iter().flatten() {
+            if result.insert(related.clone()) {
+                pending.push(related.clone());
+            }
+        }
+    }
+    Ok(result)
 }
 
 fn compare_contents(source: &[u8], target: &[u8]) -> (MergeAction, String) {

@@ -21,6 +21,7 @@ sha2 = "0.10"
 tempfile = "3.13"
 uuid = { version = "1.11", features = ["v4"] }
 walkdir = "2.5"
+zstd = "0.13"
 
 [features]
 default = []
