@@ -3269,6 +3269,7 @@ fn import_success_modal(
             });
             ui.add_space(14.0);
             ui.label(format!("{}: {}", tr(zh, "历史已验证", "History verified"), summary.native_count("ready")));
+            ui.label(format!("{}: {}", tr(zh, "关联记录已保留", "Related records preserved"), summary.native_count("related")));
             ui.label(format!("{}: {}", tr(zh, "保留归档，待显式打开", "Archive preserved; reopen to verify"), summary.native_count("archived")));
             ui.label(format!("{}: {} / {}: {}",
                 tr(zh, "历史为空", "Empty history"), summary.native_count("empty"),

@@ -48,6 +48,9 @@ The adapter intentionally does not replace the target SQLite database or patch
 desktop preference files. The desktop/CLI engine retains offline import and
 rollback, and now performs native readback itself. Its completion result and
 transaction receipt distinguish `ready`, `archived`, `empty`, and `pending`.
+Related background records are reported as `related`; they are copied and
+indexed without resuming them or requiring a user-chat preview. File/index
+writes finish before native restoration begins.
 Native failure retains the imported files/index and reports a retry; it does
 not claim verified history.
 

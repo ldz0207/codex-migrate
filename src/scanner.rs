@@ -126,8 +126,8 @@ fn scan_rollout(
                     .and_then(parse_timestamp);
                 source = payload
                     .get("source")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
+                    .filter(|value| !value.is_null())
+                    .map(|value| value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string()));
                 thread_source = payload
                     .get("thread_source")
                     .and_then(Value::as_str)

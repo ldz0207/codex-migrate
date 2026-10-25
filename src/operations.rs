@@ -483,7 +483,6 @@ fn execute_import(
         let mut imported = 0;
         let mut refreshed_count = 0;
         let mut skipped = 0;
-        let mut native_results = Vec::new();
         for planned in &plan.threads {
             let target = PathBuf::from(&planned.target_path);
             let mapped_cwd = PathBuf::from(&planned.mapped_cwd);
@@ -504,12 +503,12 @@ fn execute_import(
                     if changed > 0 {
                         rollout::rewrite_cwd_file(&target, &mapped_cwd)?;
                     }
-                    native_results.push(register_and_index(
+                    index_thread(
                         &environment,
                         &planned.thread,
                         &target,
                         &mapped_cwd,
-                    )?);
+                    )?;
                     indexed_ids.push(planned.thread.id.clone());
                     refreshed_count += 1;
                     skipped += 1;
@@ -556,12 +555,12 @@ fn execute_import(
                 fs::remove_file(&staged)
             })?;
             fs::create_dir_all(&mapped_cwd)?;
-            native_results.push(register_and_index(
+            index_thread(
                 &environment,
                 &planned.thread,
                 &target,
                 &mapped_cwd,
-            )?);
+            )?;
             indexed_ids.push(planned.thread.id.clone());
             imported += 1;
         }
@@ -600,11 +599,13 @@ fn execute_import(
         )?;
         if let Some(state_db) = refreshed.state_db.as_deref() {
             for planned in &plan.threads {
-                sqlite_adapter::validate_visible_thread(
-                    state_db,
-                    &planned.thread.id,
-                    Path::new(&planned.mapped_cwd),
-                )?;
+                if !planned.thread.is_auxiliary() {
+                    sqlite_adapter::validate_visible_thread(
+                        state_db,
+                        &planned.thread.id,
+                        Path::new(&planned.mapped_cwd),
+                    )?;
+                }
                 rollout::validate_cwd_file(
                     Path::new(&planned.target_path),
                     Path::new(&planned.mapped_cwd),
@@ -616,6 +617,16 @@ fn execute_import(
             }
         }
         let _ = validator::run_codex_doctor(&refreshed);
+        let mut native_results = Vec::new();
+        for planned in &plan.threads {
+            progress(format!("Checking native history for {}", planned.thread.id));
+            native_results.push(verify_native_thread(
+                &environment,
+                &planned.thread,
+                Path::new(&planned.target_path),
+                Path::new(&planned.mapped_cwd),
+            ));
+        }
         Ok((imported, refreshed_count, skipped, native_results))
     })();
 
@@ -652,17 +663,33 @@ fn execute_import(
     Ok(summary)
 }
 
-fn register_and_index(
+fn index_thread(
     environment: &Environment,
     thread: &crate::model::ThreadRecord,
     rollout_path: &Path,
     cwd: &Path,
-) -> Result<NativeVerification> {
+) -> Result<()> {
     let state_db = environment
         .state_db
         .as_deref()
         .ok_or_else(|| anyhow!("state database was not found"))?;
-    sqlite_adapter::upsert_thread(state_db, thread, rollout_path, cwd)?;
+    sqlite_adapter::upsert_thread(state_db, thread, rollout_path, cwd)
+        .context("write imported thread metadata")
+}
+
+fn verify_native_thread(
+    environment: &Environment,
+    thread: &crate::model::ThreadRecord,
+    rollout_path: &Path,
+    cwd: &Path,
+) -> NativeVerification {
+    if thread.is_auxiliary() {
+        return NativeVerification {
+            thread_id: thread.id.clone(),
+            status: "related".to_owned(),
+            message: "Related background record preserved without resuming it".to_owned(),
+        };
+    }
     let app_server_result = environment
         .codex_executable
         .as_deref()
@@ -693,11 +720,11 @@ fn register_and_index(
             format!("Files and index imported; native restoration needs retry: {error:#}"),
         ),
     };
-    Ok(NativeVerification {
+    NativeVerification {
         thread_id: thread.id.clone(),
         status: status.to_owned(),
         message,
-    })
+    }
 }
 
 fn ensure_state_database(environment: &Environment) -> Result<Environment> {

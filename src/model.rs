@@ -34,6 +34,16 @@ pub struct ThreadRecord {
     pub reasoning_effort: Option<String>,
 }
 
+impl ThreadRecord {
+    pub fn is_auxiliary(&self) -> bool {
+        matches!(self.thread_source.as_deref(), Some("guardian_review" | "subagent"))
+            || self.source == "subagent"
+            || serde_json::from_str::<serde_json::Value>(&self.source)
+                .ok()
+                .is_some_and(|value| value.get("subagent").is_some())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ScannedThread {
     pub record: ThreadRecord,

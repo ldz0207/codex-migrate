@@ -130,7 +130,7 @@ pub fn run(cli: Cli) -> Result<()> {
                     &args.source,
                     args.codex_home.as_deref(),
                     &options,
-                    |_| {},
+                    |message| eprintln!("{message}"),
                 )?;
                 println!(
                     "import completed; transaction id: {}",

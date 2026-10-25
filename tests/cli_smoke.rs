@@ -465,6 +465,8 @@ fn imports_compressed_selection_with_original_name_and_dependencies() {
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect::<Vec<_>>();
     lines[0]["payload"]["source"] = json!({"subagent":{"thread_spawn":{"parent_thread_id":id}}});
+    lines[0]["payload"]["thread_source"] = json!("guardian_review");
+    lines.truncate(1);
     fs::write(
         child_path,
         lines
@@ -515,6 +517,7 @@ fn imports_compressed_selection_with_original_name_and_dependencies() {
         operations::import_directory(source.path(), Some(target.path()), &options, |_| {}).unwrap();
     assert_eq!(summary.imported, 2);
     assert_eq!(summary.native_results.len(), 2);
+    assert_eq!(summary.native_count("related"), 1);
     let imported = codex_migrate::scanner::scan_codex_home(
         target.path(),
         Some(&target.path().join("state_5.sqlite")),
