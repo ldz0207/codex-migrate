@@ -463,6 +463,16 @@ fn execute_import(
     }
 
     let result = (|| {
+        // Keep one writable connection alive while indexing. With WAL databases,
+        // repeatedly closing the last writer can remove sidecars under readers.
+        let database_guard = environment
+            .state_db
+            .as_deref()
+            .map(rusqlite::Connection::open)
+            .transpose()?;
+        if let Some(connection) = &database_guard {
+            connection.query_row("PRAGMA schema_version", [], |row| row.get::<_, i64>(0))?;
+        }
         let staging = transaction.root.join("staging");
         fs::create_dir_all(&staging)?;
         let existing_by_id =
@@ -556,11 +566,15 @@ fn execute_import(
         }
         if !plan.threads.is_empty() {
             progress("Synchronizing Codex session index".to_owned());
-            let promoted =
-                session_index::sync_imported(&environment.codex_home, source_root, &plan.threads)?;
+            let promoted = session_index::sync_imported(
+                &environment.codex_home,
+                source_root,
+                &plan.threads,
+            ).context("synchronize sidebar titles")?;
             if let Some(state_db) = environment.state_db.as_deref() {
                 for (thread_id, updated_at) in promoted {
-                    sqlite_adapter::promote_thread(state_db, &thread_id, updated_at)?;
+                    sqlite_adapter::promote_thread(state_db, &thread_id, updated_at)
+                        .context("update imported session recency")?;
                 }
             }
         }
@@ -607,6 +621,7 @@ fn execute_import(
             }
         }
         let _ = validator::run_codex_doctor(&refreshed);
+        drop(database_guard);
         let mut native_results = Vec::new();
         for planned in &plan.threads {
             progress(format!("Checking native history for {}", planned.thread.id));

@@ -159,7 +159,8 @@ pub fn promote_thread(path: &Path, thread_id: &str, updated_at: i64) -> Result<(
         assignments.join(", "),
         values.len()
     );
-    let changed = connection.execute(&sql, params_from_iter(values))?;
+    let changed = connection.execute(&sql, params_from_iter(values))
+        .map_err(|error| anyhow!("promote thread {thread_id}: {error:?}"))?;
     if changed != 1 {
         return Err(anyhow!(
             "cannot promote missing thread {thread_id} in {}",

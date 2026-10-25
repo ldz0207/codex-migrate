@@ -450,6 +450,10 @@ fn imports_compressed_selection_with_original_name_and_dependencies() {
     let unrelated = "bbbbbbbb-cccc-dddd-eeee-ffffffffffff";
     create_codex_home(source.path(), id);
     create_empty_state_db(target.path());
+    Connection::open(target.path().join("state_5.sqlite"))
+        .unwrap()
+        .execute_batch("PRAGMA journal_mode=WAL;")
+        .unwrap();
     let main_path = create_rollout(source.path(), id, "/old/project/demo", "fallback", false);
     let original = fs::read(&main_path).unwrap();
     fs::write(
