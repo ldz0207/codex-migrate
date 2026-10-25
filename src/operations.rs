@@ -47,7 +47,10 @@ pub struct NativeVerification {
 
 impl ImportSummary {
     pub fn native_count(&self, status: &str) -> usize {
-        self.native_results.iter().filter(|item| item.status == status).count()
+        self.native_results
+            .iter()
+            .filter(|item| item.status == status)
+            .count()
     }
 }
 
@@ -77,16 +80,21 @@ pub fn resolve_codex_root(selected: &Path) -> Result<PathBuf> {
     let pointer_path = selected.join("current.json");
     if pointer_path.is_file() {
         let pointer: serde_json::Value = serde_json::from_slice(&fs::read(&pointer_path)?)?;
-        let relative = pointer["snapshot"].as_str()
+        let relative = pointer["snapshot"]
+            .as_str()
             .ok_or_else(|| anyhow!("snapshot pointer has no snapshot path"))?;
         let snapshot = selected.join(relative).canonicalize()?;
         if !snapshot.starts_with(selected.canonicalize()?) || snapshot == selected.canonicalize()? {
             anyhow::bail!("snapshot pointer must stay inside the selected data folder");
         }
-        let complete: serde_json::Value = serde_json::from_slice(&fs::read(snapshot.join("COMPLETE.json"))?)?;
+        let complete: serde_json::Value =
+            serde_json::from_slice(&fs::read(snapshot.join("COMPLETE.json"))?)?;
         let manifest = fs::read(snapshot.join("manifest.json"))?;
         let actual_hash = hex::encode(Sha256::digest(&manifest));
-        if !complete["manifest_sha256"].as_str().is_some_and(|hash| hash.eq_ignore_ascii_case(&actual_hash)) {
+        if !complete["manifest_sha256"]
+            .as_str()
+            .is_some_and(|hash| hash.eq_ignore_ascii_case(&actual_hash))
+        {
             anyhow::bail!("snapshot manifest checksum mismatch");
         }
         let root = snapshot.join("codex");
@@ -496,7 +504,12 @@ fn execute_import(
                     if changed > 0 {
                         rollout::rewrite_cwd_file(&target, &mapped_cwd)?;
                     }
-                    native_results.push(register_and_index(&environment, &planned.thread, &target, &mapped_cwd)?);
+                    native_results.push(register_and_index(
+                        &environment,
+                        &planned.thread,
+                        &target,
+                        &mapped_cwd,
+                    )?);
                     indexed_ids.push(planned.thread.id.clone());
                     refreshed_count += 1;
                     skipped += 1;
@@ -543,7 +556,12 @@ fn execute_import(
                 fs::remove_file(&staged)
             })?;
             fs::create_dir_all(&mapped_cwd)?;
-            native_results.push(register_and_index(&environment, &planned.thread, &target, &mapped_cwd)?);
+            native_results.push(register_and_index(
+                &environment,
+                &planned.thread,
+                &target,
+                &mapped_cwd,
+            )?);
             indexed_ids.push(planned.thread.id.clone());
             imported += 1;
         }
@@ -621,10 +639,16 @@ fn execute_import(
         skipped,
         native_results,
     };
-    fs::write(transaction.root.join("import-result.json"), serde_json::to_vec_pretty(&summary)?)?;
+    fs::write(
+        transaction.root.join("import-result.json"),
+        serde_json::to_vec_pretty(&summary)?,
+    )?;
     transaction.complete()?;
-    progress(format!("Files imported; native history verified for {} session(s), pending {}",
-        summary.native_count("ready"), summary.native_count("pending")));
+    progress(format!(
+        "Files imported; native history verified for {} session(s), pending {}",
+        summary.native_count("ready"),
+        summary.native_count("pending")
+    ));
     Ok(summary)
 }
 
@@ -634,7 +658,9 @@ fn register_and_index(
     rollout_path: &Path,
     cwd: &Path,
 ) -> Result<NativeVerification> {
-    let state_db = environment.state_db.as_deref()
+    let state_db = environment
+        .state_db
+        .as_deref()
         .ok_or_else(|| anyhow!("state database was not found"))?;
     sqlite_adapter::upsert_thread(state_db, thread, rollout_path, cwd)?;
     let app_server_result = environment
@@ -653,12 +679,25 @@ fn register_and_index(
             )
         });
     let (status, message) = match app_server_result {
-        Ok(true) => ("ready", "UUID, name, working directory and historical page verified".to_owned()),
-        Ok(false) if thread.archived => ("archived", "Archive preserved; history verification deferred until explicit reopen".to_owned()),
+        Ok(true) => (
+            "ready",
+            "UUID, name, working directory and historical page verified".to_owned(),
+        ),
+        Ok(false) if thread.archived => (
+            "archived",
+            "Archive preserved; history verification deferred until explicit reopen".to_owned(),
+        ),
         Ok(false) => ("empty", "Codex returned an empty history page".to_owned()),
-        Err(error) => ("pending", format!("Files and index imported; native restoration needs retry: {error:#}")),
+        Err(error) => (
+            "pending",
+            format!("Files and index imported; native restoration needs retry: {error:#}"),
+        ),
     };
-    Ok(NativeVerification { thread_id: thread.id.clone(), status:status.to_owned(), message })
+    Ok(NativeVerification {
+        thread_id: thread.id.clone(),
+        status: status.to_owned(),
+        message,
+    })
 }
 
 fn ensure_state_database(environment: &Environment) -> Result<Environment> {

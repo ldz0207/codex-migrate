@@ -1,6 +1,6 @@
 use crate::model::{ScannedThread, ThreadRecord};
-use crate::{rollout, session_index};
 use crate::sqlite_adapter;
+use crate::{rollout, session_index};
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{Connection, OptionalExtension};
 use serde_json::Value;
@@ -37,7 +37,11 @@ pub fn scan_codex_home(home: &Path, state_db: Option<&Path>) -> Result<Vec<Scann
     for (id, entry) in session_index::load(home)? {
         if let Some(name) = entry.get("thread_name").and_then(Value::as_str) {
             let metadata = db_metadata.entry(id).or_default();
-            if metadata.name.as_deref().is_none_or(|value| value.trim().is_empty()) {
+            if metadata
+                .name
+                .as_deref()
+                .is_none_or(|value| value.trim().is_empty())
+            {
                 metadata.name = Some(name.to_owned());
             }
         }
@@ -194,11 +198,13 @@ fn scan_rollout(
             .or_else(|| first_user_message.as_deref().map(summarize_title))
             .unwrap_or_default(),
         created_at: metadata
-            .map(|value| value.created_at).filter(|value| *value > 0)
+            .map(|value| value.created_at)
+            .filter(|value| *value > 0)
             .or(timestamp)
             .unwrap_or_default(),
         updated_at: metadata
-            .map(|value| value.updated_at).filter(|value| *value > 0)
+            .map(|value| value.updated_at)
+            .filter(|value| *value > 0)
             .or(timestamp)
             .unwrap_or_default(),
         cwd: cwd
@@ -215,7 +221,9 @@ fn scan_rollout(
         cli_version: cli_version
             .or_else(|| metadata.map(|value| value.cli_version.clone()))
             .unwrap_or_default(),
-        archived: metadata.and_then(|value| value.archived).unwrap_or(archived),
+        archived: metadata
+            .and_then(|value| value.archived)
+            .unwrap_or(archived),
         archive_path,
         sha256,
         byte_len: content.len() as u64,
@@ -316,7 +324,10 @@ fn parse_timestamp(value: &str) -> Option<i64> {
 
 fn id_from_filename(path: &Path) -> Option<String> {
     let name = path.file_name()?.to_str()?;
-    let stem = name.strip_suffix(".zst").unwrap_or(name).strip_suffix(".jsonl")?;
+    let stem = name
+        .strip_suffix(".zst")
+        .unwrap_or(name)
+        .strip_suffix(".jsonl")?;
     let suffix = stem.get(stem.len().checked_sub(36)?..)?;
     uuid::Uuid::parse_str(suffix).ok().map(|id| id.to_string())
 }

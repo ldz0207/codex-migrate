@@ -113,7 +113,12 @@ fn related_ids(thread: &ScannedThread) -> BTreeSet<String> {
             continue;
         }
         let payload = &value["payload"];
-        for key in ["id", "forked_from_id", "forked_from_thread_id", "parent_thread_id"] {
+        for key in [
+            "id",
+            "forked_from_id",
+            "forked_from_thread_id",
+            "parent_thread_id",
+        ] {
             if let Some(id) = payload[key].as_str() {
                 if id != thread.record.id {
                     ids.insert(id.to_owned());
@@ -121,11 +126,14 @@ fn related_ids(thread: &ScannedThread) -> BTreeSet<String> {
             }
         }
         for key in ["source", "thread_source"] {
-            let source = payload[key].as_str()
+            let source = payload[key]
+                .as_str()
                 .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
                 .unwrap_or_else(|| payload[key].clone());
-            if let Some(id) = source.pointer("/subagent/thread_spawn/parent_thread_id")
-                .and_then(serde_json::Value::as_str) {
+            if let Some(id) = source
+                .pointer("/subagent/thread_spawn/parent_thread_id")
+                .and_then(serde_json::Value::as_str)
+            {
                 ids.insert(id.to_owned());
             }
         }
@@ -134,20 +142,34 @@ fn related_ids(thread: &ScannedThread) -> BTreeSet<String> {
     ids
 }
 
-fn expand_selection(threads: &[ScannedThread], selected: &BTreeSet<String>) -> Result<BTreeSet<String>> {
-    let known = threads.iter().map(|thread| thread.record.id.clone()).collect::<BTreeSet<_>>();
+fn expand_selection(
+    threads: &[ScannedThread],
+    selected: &BTreeSet<String>,
+) -> Result<BTreeSet<String>> {
+    let known = threads
+        .iter()
+        .map(|thread| thread.record.id.clone())
+        .collect::<BTreeSet<_>>();
     let mut graph: HashMap<String, BTreeSet<String>> = HashMap::new();
     for thread in threads {
         for related in related_ids(thread) {
-            graph.entry(thread.record.id.clone()).or_default().insert(related.clone());
-            graph.entry(related).or_default().insert(thread.record.id.clone());
+            graph
+                .entry(thread.record.id.clone())
+                .or_default()
+                .insert(related.clone());
+            graph
+                .entry(related)
+                .or_default()
+                .insert(thread.record.id.clone());
         }
     }
     let mut result = selected.clone();
     let mut pending = selected.iter().cloned().collect::<Vec<_>>();
     while let Some(id) = pending.pop() {
         if !known.contains(&id) {
-            return Err(anyhow!("required related session is missing from source: {id}"));
+            return Err(anyhow!(
+                "required related session is missing from source: {id}"
+            ));
         }
         for related in graph.get(&id).into_iter().flatten() {
             if result.insert(related.clone()) {
