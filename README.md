@@ -47,6 +47,10 @@ selected sessions into an existing local Codex environment.
 
 ## Features
 
+This fork also provides an optional [Windows native-restoration helper](docs/native-restore-windows.md)
+for already-copied sessions: recover missing titles, verify paginated history,
+and preserve archived records without editing the live database directly.
+
 - Migrate active and archived sessions across macOS, Windows, Linux, and WSL.
 - Select individual projects and sessions before importing.
 - Map old project paths to folders on the new device.

@@ -6,6 +6,11 @@ The project uses semantic versioning where practical.
 
 ## [Unreleased]
 
+- Add an optional PowerShell 5.1+ native-restoration adapter for already-copied
+  Windows sessions, with UTF-8 RPC, missing-title restoration, history-page
+  verification, archive preservation, explicit working-directory changes, and
+  isolated protocol tests. The Rust scanner/import engine is unchanged.
+
 - Export backups as complete `.codex` directory copies instead of minimal
   session-only folders, preserving databases, settings, Skills, logs, caches,
   and other local contents while excluding root-level login credential files.

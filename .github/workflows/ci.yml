@@ -10,6 +10,14 @@ permissions:
   contents: read
 
 jobs:
+  native-restore:
+    name: Native restore protocol (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run isolated native-restoration tests
+        run: python -m unittest discover -s tests -p test_native_restore.py -v
+
   test:
     name: Test (${{ matrix.os }})
     strategy:
