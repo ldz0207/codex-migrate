@@ -2,6 +2,9 @@ name: Prepare development sources
 
 on:
   workflow_dispatch:
+  push:
+    branches: ["feat/windows-native-restore"]
+    paths: [".github/workflows/prepare-sources.yml"]
 
 permissions:
   contents: read
