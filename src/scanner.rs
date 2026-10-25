@@ -116,7 +116,10 @@ fn scan_rollout(
         match value.get("type").and_then(Value::as_str) {
             Some("session_meta") => {
                 let payload = &value["payload"];
-                history_mode = payload.get("history_mode").and_then(Value::as_str).map(str::to_owned);
+                history_mode = payload
+                    .get("history_mode")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
                 id = payload.get("id").and_then(Value::as_str).map(str::to_owned);
                 cwd = payload
                     .get("cwd")

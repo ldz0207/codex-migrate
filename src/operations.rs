@@ -459,7 +459,8 @@ fn execute_import(
         } else {
             transaction.note_created(&history_db)?;
             for suffix in ["-wal", "-shm"] {
-                transaction.note_created(&PathBuf::from(format!("{}{suffix}", history_db.display())))?;
+                transaction
+                    .note_created(&PathBuf::from(format!("{}{suffix}", history_db.display())))?;
             }
         }
     }

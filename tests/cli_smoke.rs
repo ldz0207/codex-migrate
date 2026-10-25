@@ -456,9 +456,16 @@ fn imports_compressed_selection_with_original_name_and_dependencies() {
         .unwrap();
     let main_path = create_rollout(source.path(), id, "/old/project/demo", "fallback", false);
     let original = fs::read_to_string(&main_path).unwrap();
-    let mut main_lines = original.lines().map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()).collect::<Vec<_>>();
+    let mut main_lines = original
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
     main_lines[0]["payload"]["history_mode"] = json!("paginated");
-    let original = main_lines.iter().map(|line| line.to_string()+"\n").collect::<String>().into_bytes();
+    let original = main_lines
+        .iter()
+        .map(|line| line.to_string() + "\n")
+        .collect::<String>()
+        .into_bytes();
     fs::write(
         main_path.with_extension("jsonl.zst"),
         zstd::stream::encode_all(original.as_slice(), 0).unwrap(),
@@ -526,7 +533,13 @@ fn imports_compressed_selection_with_original_name_and_dependencies() {
     assert_eq!(summary.native_results.len(), 2);
     assert_eq!(summary.native_count("related"), 1);
     let connection = Connection::open(target.path().join("state_5.sqlite")).unwrap();
-    let mode: String = connection.query_row("SELECT history_mode FROM threads WHERE id=?1", [id], |row| row.get(0)).unwrap();
+    let mode: String = connection
+        .query_row(
+            "SELECT history_mode FROM threads WHERE id=?1",
+            [id],
+            |row| row.get(0),
+        )
+        .unwrap();
     assert_eq!(mode, "paginated");
     drop(connection);
     let imported = codex_migrate::scanner::scan_codex_home(
