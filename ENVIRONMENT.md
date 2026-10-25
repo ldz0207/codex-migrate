@@ -29,3 +29,7 @@ Local verification on 2026-10-25:
   a Rust toolchain, Python, or PowerShell for the desktop application's own flow.
 - Desktop visibility is a separate user acceptance step, never inferred from
   a successful RPC response alone. No new model turn was started by the helper.
+- The compiled Windows CLI passed a fresh isolated import of one ordinary chat
+  and four related records, original-name/history readback, repeat import with
+  no new copies, and compressed archive preservation. Input hashes were unchanged.
+  The GUI's live click/visual acceptance remains pending.

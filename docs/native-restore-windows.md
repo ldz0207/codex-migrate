@@ -51,6 +51,12 @@ transaction receipt distinguish `ready`, `archived`, `empty`, and `pending`.
 Related background records are reported as `related`; they are copied and
 indexed without resuming them or requiring a user-chat preview. File/index
 writes finish before native restoration begins.
+The source `session_meta.history_mode` flag is retained in schemas that expose
+it, so paginated history is not accidentally registered as legacy history.
+Rollback snapshots include both state and native history databases. A genuine
+legacy format that the installed Codex cannot page remains `pending`; this
+importer does not relabel legacy bytes as paginated or silently bulk-convert
+unselected chats.
 Native failure retains the imported files/index and reports a retry; it does
 not claim verified history.
 
