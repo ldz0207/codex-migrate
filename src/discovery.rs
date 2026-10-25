@@ -146,7 +146,7 @@ fn read_schema_version(path: &Path) -> Result<Option<i64>> {
 }
 
 fn find_executable(name: &str) -> Option<PathBuf> {
-    let path = env::var_os("PATH")?;
+    let path = env::var_os("PATH").unwrap_or_default();
     for directory in env::split_paths(&path) {
         let candidate = directory.join(name);
         if candidate.is_file() {
@@ -158,6 +158,23 @@ fn find_executable(name: &str) -> Option<PathBuf> {
             if candidate.is_file() {
                 return Some(candidate);
             }
+        }
+    }
+    #[cfg(windows)]
+    if name == "codex" {
+        let roots = [
+            env::var_os("LOCALAPPDATA").map(|root| PathBuf::from(root).join("OpenAI/Codex/bin")),
+            env::var_os("APPDATA").map(|root| PathBuf::from(root).join("npm/node_modules/@openai/codex")),
+        ];
+        let mut candidates = roots.into_iter().flatten().flat_map(|root| {
+            walkdir::WalkDir::new(root).max_depth(8).follow_links(false).into_iter()
+                .filter_map(Result::ok)
+                .filter(|entry| entry.file_type().is_file() && entry.file_name() == "codex.exe")
+                .map(|entry| entry.into_path())
+        }).collect::<Vec<_>>();
+        candidates.sort_by_key(|path| std::fs::metadata(path).and_then(|metadata| metadata.modified()).ok());
+        if let Some(candidate) = candidates.pop() {
+            return Some(candidate);
         }
     }
     #[cfg(target_os = "macos")]

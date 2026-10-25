@@ -48,7 +48,9 @@ selected sessions into an existing local Codex environment.
 ## Features
 
 This fork integrates selective restoration into the desktop app and CLI:
-sessions start unselected, required parent/subagent records appear in the import
+sessions start unselected and can be searched by title, UUID or project path.
+Select-all affects visible search results, with an optional archive filter.
+Required parent/subagent records appear in the import
 preview, and compressed `.jsonl.zst` input is supported. Imported sessions are
 checked through Codex for their UUID, title, mapped directory and historical
 page. The completion dialog distinguishes verified history, preserved archives,

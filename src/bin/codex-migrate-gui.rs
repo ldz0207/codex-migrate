@@ -194,6 +194,8 @@ struct MigrationApp {
     export_parent: String,
     catalog: Option<SourceCatalog>,
     projects: Vec<UiProject>,
+    import_search: String,
+    include_archived: bool,
     repair_projects: Vec<UiProject>,
     html_projects: Vec<UiProject>,
     html_export_folder: String,
@@ -248,6 +250,8 @@ impl MigrationApp {
                 .into_owned(),
             catalog: None,
             projects: Vec::new(),
+            import_search: String::new(),
+            include_archived: false,
             repair_projects: Vec::new(),
             html_projects: Vec::new(),
             html_export_folder: String::new(),
@@ -854,12 +858,11 @@ impl MigrationApp {
     }
 
     fn all_state(&self) -> CheckState {
-        let selected = self.selected_count();
-        let total = self
-            .projects
-            .iter()
-            .map(|project| project.sessions.len())
-            .sum::<usize>();
+        let visible = self.projects.iter().flat_map(|project| project.sessions.iter())
+            .filter(|session| session_matches(session, &self.import_search, self.include_archived))
+            .collect::<Vec<_>>();
+        let selected = visible.iter().filter(|session| session.selected).count();
+        let total = visible.len();
         match selected {
             0 => CheckState::None,
             value if value == total && total > 0 => CheckState::All,
@@ -869,7 +872,11 @@ impl MigrationApp {
 
     fn set_all(&mut self, selected: bool) {
         for project in &mut self.projects {
-            project.set_selected(selected);
+            for session in &mut project.sessions {
+                if session_matches(session, &self.import_search, self.include_archived) {
+                    session.selected = selected;
+                }
+            }
         }
         self.plan = None;
         if self.step == ImportStep::Preview {
@@ -1118,6 +1125,14 @@ impl MigrationApp {
         let pending = self.pending_mapping_count();
         let all_state = self.all_state();
         ui.horizontal(|ui| {
+            ui.label(tr(zh, "搜索对话", "Search sessions"));
+            ui.add(egui::TextEdit::singleline(&mut self.import_search)
+                .hint_text(tr(zh, "标题、UUID 或项目路径", "Title, UUID or project path")));
+            bool_control(ui, &mut self.include_archived, tr(zh, "包含已归档", "Include archived"));
+        });
+        ui.label(RichText::new(tr(zh, "默认不勾选；全选仅作用于当前搜索结果，已选对话会保留。", "Nothing is preselected. Select all affects visible results; earlier selections are retained.")).size(12.0).color(MUTED));
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
             ui.label(
                 RichText::new(tr(zh, "父目录映射", "Parent mapping"))
                     .size(13.0)
@@ -1166,7 +1181,7 @@ impl MigrationApp {
                 true,
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if selection_control(ui, all_state, tr(zh, "全选", "Select all")).clicked() {
+                if selection_control(ui, all_state, tr(zh, "全选当前结果", "Select visible")).clicked() {
                     self.set_all(all_state != CheckState::All);
                 }
             });
@@ -1191,6 +1206,10 @@ impl MigrationApp {
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     for project_index in 0..self.projects.len() {
+                        if !self.projects[project_index].sessions.iter().any(|session|
+                            session_matches(session, &self.import_search, self.include_archived)) {
+                            continue;
+                        }
                         self.project_card(ui, project_index);
                         ui.add_space(10.0);
                     }
@@ -1202,7 +1221,7 @@ impl MigrationApp {
                 if selection_control(
                     ui,
                     all_state,
-                    tr(zh, "全选项目与会话", "Select all projects and sessions"),
+                    tr(zh, "全选当前搜索结果", "Select all visible results"),
                 )
                 .clicked()
                 {
@@ -1246,8 +1265,12 @@ impl MigrationApp {
 
     fn project_card(&mut self, ui: &mut egui::Ui, index: usize) {
         let zh = self.chinese();
+        let query = self.import_search.clone();
+        let include_archived = self.include_archived;
         let project = &mut self.projects[index];
-        let state = project.state();
+        let visible = project.sessions.iter().filter(|session| session_matches(session, &query, include_archived)).collect::<Vec<_>>();
+        let visible_selected = visible.iter().filter(|session| session.selected).count();
+        let state = if visible_selected == 0 { CheckState::None } else if visible_selected == visible.len() { CheckState::All } else { CheckState::Partial };
         let selected = project.selected_count();
         let total = project.sessions.len();
         egui::Frame::new()
@@ -1267,7 +1290,11 @@ impl MigrationApp {
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             if selection_control(ui, state, "").clicked() {
-                                project.set_selected(state != CheckState::All);
+                                for session in &mut project.sessions {
+                                    if session_matches(session, &query, include_archived) {
+                                        session.selected = state != CheckState::All;
+                                    }
+                                }
                                 self.plan = None;
                             }
                             if icon_only_button(
@@ -1379,6 +1406,9 @@ impl MigrationApp {
                 if project.expanded {
                     ui.add_space(4.0);
                     for session in &mut project.sessions {
+                        if !session_matches(session, &query, include_archived) {
+                            continue;
+                        }
                         ui.horizontal(|ui| {
                             ui.add_space(56.0);
                             let mut selected = session.selected;
@@ -2318,6 +2348,15 @@ impl eframe::App for MigrationApp {
             });
         self.confirmation_windows(context);
     }
+}
+
+fn session_matches(session: &UiSession, query: &str, include_archived: bool) -> bool {
+    if session.source.thread.archived && !include_archived {
+        return false;
+    }
+    let query = query.trim().to_lowercase();
+    query.is_empty() || [&session.source.thread.title, &session.source.thread.id, &session.source.thread.cwd]
+        .iter().any(|value| value.to_lowercase().contains(&query))
 }
 
 fn project_to_ui(project: &SourceProject) -> UiProject {
@@ -3508,6 +3547,20 @@ mod tests {
             sessions: vec![session("one")],
         };
         assert!(project_has_path_problem(&project));
+    }
+
+    #[test]
+    fn search_matches_title_uuid_path_and_respects_archive_filter() {
+        let mut item = session("search-id");
+        item.source.thread.title = "原标题 Search".to_owned();
+        assert!(session_matches(&item, "原标题", false));
+        assert!(session_matches(&item, "SEARCH", false));
+        assert!(session_matches(&item, "search-id", false));
+        assert!(session_matches(&item, "/old/project", false));
+        assert!(!session_matches(&item, "unrelated", false));
+        item.source.thread.archived = true;
+        assert!(!session_matches(&item, "原标题", false));
+        assert!(session_matches(&item, "原标题", true));
     }
 
     #[test]
