@@ -127,7 +127,12 @@ fn scan_rollout(
                 source = payload
                     .get("source")
                     .filter(|value| !value.is_null())
-                    .map(|value| value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string()));
+                    .map(|value| {
+                        value
+                            .as_str()
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| value.to_string())
+                    });
                 thread_source = payload
                     .get("thread_source")
                     .and_then(Value::as_str)

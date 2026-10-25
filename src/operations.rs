@@ -503,12 +503,7 @@ fn execute_import(
                     if changed > 0 {
                         rollout::rewrite_cwd_file(&target, &mapped_cwd)?;
                     }
-                    index_thread(
-                        &environment,
-                        &planned.thread,
-                        &target,
-                        &mapped_cwd,
-                    )?;
+                    index_thread(&environment, &planned.thread, &target, &mapped_cwd)?;
                     indexed_ids.push(planned.thread.id.clone());
                     refreshed_count += 1;
                     skipped += 1;
@@ -555,12 +550,7 @@ fn execute_import(
                 fs::remove_file(&staged)
             })?;
             fs::create_dir_all(&mapped_cwd)?;
-            index_thread(
-                &environment,
-                &planned.thread,
-                &target,
-                &mapped_cwd,
-            )?;
+            index_thread(&environment, &planned.thread, &target, &mapped_cwd)?;
             indexed_ids.push(planned.thread.id.clone());
             imported += 1;
         }
