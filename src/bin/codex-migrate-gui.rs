@@ -858,7 +858,10 @@ impl MigrationApp {
     }
 
     fn all_state(&self) -> CheckState {
-        let visible = self.projects.iter().flat_map(|project| project.sessions.iter())
+        let visible = self
+            .projects
+            .iter()
+            .flat_map(|project| project.sessions.iter())
             .filter(|session| session_matches(session, &self.import_search, self.include_archived))
             .collect::<Vec<_>>();
         let selected = visible.iter().filter(|session| session.selected).count();
@@ -1126,9 +1129,18 @@ impl MigrationApp {
         let all_state = self.all_state();
         ui.horizontal(|ui| {
             ui.label(tr(zh, "搜索对话", "Search sessions"));
-            ui.add(egui::TextEdit::singleline(&mut self.import_search)
-                .hint_text(tr(zh, "标题、UUID 或项目路径", "Title, UUID or project path")));
-            bool_control(ui, &mut self.include_archived, tr(zh, "包含已归档", "Include archived"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.import_search).hint_text(tr(
+                    zh,
+                    "标题、UUID 或项目路径",
+                    "Title, UUID or project path",
+                )),
+            );
+            bool_control(
+                ui,
+                &mut self.include_archived,
+                tr(zh, "包含已归档", "Include archived"),
+            );
         });
         ui.label(RichText::new(tr(zh, "默认不勾选；全选仅作用于当前搜索结果，已选对话会保留。", "Nothing is preselected. Select all affects visible results; earlier selections are retained.")).size(12.0).color(MUTED));
         ui.add_space(8.0);
@@ -1181,7 +1193,9 @@ impl MigrationApp {
                 true,
             );
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                if selection_control(ui, all_state, tr(zh, "全选当前结果", "Select visible")).clicked() {
+                if selection_control(ui, all_state, tr(zh, "全选当前结果", "Select visible"))
+                    .clicked()
+                {
                     self.set_all(all_state != CheckState::All);
                 }
             });
@@ -1206,8 +1220,9 @@ impl MigrationApp {
                 .show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     for project_index in 0..self.projects.len() {
-                        if !self.projects[project_index].sessions.iter().any(|session|
-                            session_matches(session, &self.import_search, self.include_archived)) {
+                        if !self.projects[project_index].sessions.iter().any(|session| {
+                            session_matches(session, &self.import_search, self.include_archived)
+                        }) {
                             continue;
                         }
                         self.project_card(ui, project_index);
@@ -1268,9 +1283,19 @@ impl MigrationApp {
         let query = self.import_search.clone();
         let include_archived = self.include_archived;
         let project = &mut self.projects[index];
-        let visible = project.sessions.iter().filter(|session| session_matches(session, &query, include_archived)).collect::<Vec<_>>();
+        let visible = project
+            .sessions
+            .iter()
+            .filter(|session| session_matches(session, &query, include_archived))
+            .collect::<Vec<_>>();
         let visible_selected = visible.iter().filter(|session| session.selected).count();
-        let state = if visible_selected == 0 { CheckState::None } else if visible_selected == visible.len() { CheckState::All } else { CheckState::Partial };
+        let state = if visible_selected == 0 {
+            CheckState::None
+        } else if visible_selected == visible.len() {
+            CheckState::All
+        } else {
+            CheckState::Partial
+        };
         let selected = project.selected_count();
         let total = project.sessions.len();
         egui::Frame::new()
@@ -2355,8 +2380,14 @@ fn session_matches(session: &UiSession, query: &str, include_archived: bool) -> 
         return false;
     }
     let query = query.trim().to_lowercase();
-    query.is_empty() || [&session.source.thread.title, &session.source.thread.id, &session.source.thread.cwd]
-        .iter().any(|value| value.to_lowercase().contains(&query))
+    query.is_empty()
+        || [
+            &session.source.thread.title,
+            &session.source.thread.id,
+            &session.source.thread.cwd,
+        ]
+        .iter()
+        .any(|value| value.to_lowercase().contains(&query))
 }
 
 fn project_to_ui(project: &SourceProject) -> UiProject {
