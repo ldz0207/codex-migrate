@@ -3511,6 +3511,18 @@ mod tests {
     }
 
     #[test]
+    fn scanned_import_requires_explicit_session_selection() {
+        let source = SourceProject {
+            original_cwd: "/old/project".to_owned(),
+            suggested_target: None,
+            sessions: vec![session("one").source, session("two").source],
+        };
+        let project = project_to_ui(&source);
+        assert_eq!(project.selected_count(), 0);
+        assert!(selected_ids(&[project]).is_empty());
+    }
+
+    #[test]
     fn html_selection_defaults_to_none_and_supports_select_all() {
         let mut projects = vec![UiProject {
             original_cwd: "/project".to_owned(),

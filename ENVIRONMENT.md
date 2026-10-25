@@ -3,7 +3,10 @@
 The upstream Rust application is version 1.0.8. Its dependencies and resolved
 versions remain defined by `Cargo.toml` and `Cargo.lock`; see the main README for
 the Rust/GUI build requirements. GUI stroke widths use explicit f32 literals to
-avoid newer compiler fallback errors; the migration engine is unchanged.
+avoid newer compiler fallback errors. This fork's engine now supports compressed
+rollouts through the direct `zstd` 0.13 dependency, related-session selection,
+and native title/history verification through the installed Codex executable.
+Resolved dependencies are pinned by `Cargo.lock`; unrelated versions are retained.
 
 The optional Windows native-restoration adapter has no third-party PowerShell
 or Python package dependencies. End users need Windows PowerShell 5.1+ and an

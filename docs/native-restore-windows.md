@@ -34,18 +34,22 @@ Results distinguish `ready`, `archived`, and `empty`; RPC/time-out or readback
 errors cause a failure. `desktopDisplayVerified` stays false: protocol readback
 cannot prove that a user has seen the conversation in the desktop UI.
 
-## Compressed records and current limitations
+## Desktop import and compressed records
 
-Codex itself reads its `.jsonl.zst` records. This adapter delegates history
-loading to the installed Codex version, so it does not decompress or rewrite
-historical messages. The upstream Rust scanner still only selects `.jsonl`:
-this change does **not** claim compressed-input support for that scanner.
-Dependency/parent records must already have been copied by the importer.
+The desktop/CLI scanner reads both `.jsonl` and `.jsonl.zst`, using `zstd` for
+compressed input. New imports are written as normal JSONL; a compressed file
+already present on the destination stays compressed when its directory metadata
+is updated. Sources remain unchanged. Required related records are included in
+the preview; a missing required record blocks import instead of dropping context.
+The standalone PowerShell adapter delegates history loading to Codex and expects
+dependency/parent records to have been copied already.
 
 The adapter intentionally does not replace the target SQLite database or patch
-desktop preference files. The Rust engine's existing import/rollback behavior
-is unchanged. Use the upstream GUI for its documented offline migration flow;
-this optional helper covers native recognition after a separate bounded copy.
+desktop preference files. The desktop/CLI engine retains offline import and
+rollback, and now performs native readback itself. Its completion result and
+transaction receipt distinguish `ready`, `archived`, `empty`, and `pending`.
+Native failure retains the imported files/index and reports a retry; it does
+not claim verified history.
 
 ## Verification
 

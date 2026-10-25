@@ -18,7 +18,7 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --all
-      - run: cargo generate-lockfile
+      - run: cargo update --workspace
       - uses: actions/upload-artifact@v4
         with:
           name: prepared-sources

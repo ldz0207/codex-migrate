@@ -481,6 +481,34 @@ fn imports_compressed_selection_with_original_name_and_dependencies() {
 }
 
 #[test]
+fn existing_local_name_and_archive_survive_repeat_import() {
+    use codex_migrate::{model::ImportOptions, operations};
+    let source = TempDir::new().unwrap();
+    let target = TempDir::new().unwrap();
+    let project = TempDir::new().unwrap();
+    let id = "11111111-2222-3333-4444-555555555555";
+    create_codex_home(source.path(), id);
+    create_codex_home(target.path(), id);
+    let connection = Connection::open(target.path().join("state_5.sqlite")).unwrap();
+    connection.execute_batch("ALTER TABLE threads ADD COLUMN name TEXT;").unwrap();
+    connection.execute("UPDATE threads SET name='本机标题', archived=1 WHERE id=?1", [id]).unwrap();
+    drop(connection);
+    let options = ImportOptions {
+        selected_thread_ids: [id.to_owned()].into_iter().collect(),
+        mappings: [("/old/project/demo".to_owned(), project.path().to_string_lossy().into_owned())].into_iter().collect(),
+        history_only_projects: Default::default(),
+    };
+    let plan = operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap();
+    assert_eq!(plan.threads[0].thread.title, "本机标题");
+    assert!(plan.threads[0].thread.archived);
+    operations::import_directory(source.path(), Some(target.path()), &options, |_| {}).unwrap();
+    let connection = Connection::open(target.path().join("state_5.sqlite")).unwrap();
+    let (name, archived): (String, bool) = connection.query_row("SELECT name, archived FROM threads WHERE id=?1", [id], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_eq!(name,"本机标题");
+    assert!(archived);
+}
+
+#[test]
 fn resolves_completed_snapshot_and_rejects_tampering() {
     use codex_migrate::operations;
     use sha2::{Digest, Sha256};
