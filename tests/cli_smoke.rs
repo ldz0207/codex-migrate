@@ -580,7 +580,8 @@ fn selecting_two_chats_does_not_import_101_background_siblings() {
         selected_thread_ids: BTreeSet::from([main.to_owned(), other.to_owned()]),
         ..Default::default()
     };
-    let plan = operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap();
+    let plan =
+        operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap();
     assert_eq!(plan.threads.len(), 2);
     assert_eq!(plan.selected_count(), 2);
     assert_eq!(plan.dependency_count(), 0);
@@ -608,20 +609,37 @@ fn selected_child_requires_ancestors_without_importing_siblings() {
         selected_thread_ids: BTreeSet::from([child.to_owned()]),
         ..Default::default()
     };
-    let plan = operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap();
-    let ids = plan.threads.iter().map(|item| item.thread.id.as_str()).collect::<BTreeSet<_>>();
+    let plan =
+        operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap();
+    let ids = plan
+        .threads
+        .iter()
+        .map(|item| item.thread.id.as_str())
+        .collect::<BTreeSet<_>>();
     assert_eq!(ids, BTreeSet::from([parent, child]));
     assert_eq!(plan.selected_count(), 1);
     assert_eq!(plan.dependency_count(), 1);
-    assert!(plan.threads.iter().find(|item| item.thread.id == parent).unwrap().reason.starts_with("Required parent"));
+    assert!(plan
+        .threads
+        .iter()
+        .find(|item| item.thread.id == parent)
+        .unwrap()
+        .reason
+        .starts_with("Required parent"));
     fs::remove_file(parent_path).unwrap();
-    let error = operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap_err();
-    assert!(error.to_string().contains("required related session is missing"));
+    let error = operations::plan_directory_import(source.path(), Some(target.path()), &options)
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("required related session is missing"));
 }
 
 fn set_rollout_parent(path: &Path, parent: &str, guardian: bool) {
     let text = fs::read_to_string(path).unwrap();
-    let mut lines = text.lines().map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap()).collect::<Vec<_>>();
+    let mut lines = text
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
     if guardian {
         lines[0]["payload"]["id"] = json!(parent);
         lines[0]["payload"]["thread_source"] = json!("guardian_review");
@@ -629,7 +647,14 @@ fn set_rollout_parent(path: &Path, parent: &str, guardian: bool) {
     } else {
         lines[0]["payload"]["forked_from_thread_id"] = json!(parent);
     }
-    fs::write(path, lines.iter().map(|line| line.to_string() + "\n").collect::<String>()).unwrap();
+    fs::write(
+        path,
+        lines
+            .iter()
+            .map(|line| line.to_string() + "\n")
+            .collect::<String>(),
+    )
+    .unwrap();
 }
 
 #[test]

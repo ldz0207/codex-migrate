@@ -136,7 +136,10 @@ pub struct ImportPlan {
 
 impl ImportPlan {
     pub fn selected_count(&self) -> usize {
-        self.threads.iter().filter(|item| item.explicitly_selected).count()
+        self.threads
+            .iter()
+            .filter(|item| item.explicitly_selected)
+            .count()
     }
 
     pub fn dependency_count(&self) -> usize {
