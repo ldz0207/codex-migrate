@@ -116,6 +116,8 @@ pub enum MergeAction {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PlannedThread {
     pub thread: ThreadRecord,
+    #[serde(default)]
+    pub explicitly_selected: bool,
     pub source_path: String,
     pub mapped_cwd: String,
     pub history_only: bool,
@@ -130,6 +132,16 @@ pub struct ImportPlan {
     pub codex_home: String,
     pub threads: Vec<PlannedThread>,
     pub conflicts: usize,
+}
+
+impl ImportPlan {
+    pub fn selected_count(&self) -> usize {
+        self.threads.iter().filter(|item| item.explicitly_selected).count()
+    }
+
+    pub fn dependency_count(&self) -> usize {
+        self.threads.len() - self.selected_count()
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

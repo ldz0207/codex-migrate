@@ -124,6 +124,7 @@ mod tests {
 
     fn planned(id: &str, title: &str) -> PlannedThread {
         PlannedThread {
+            explicitly_selected: true,
             thread: ThreadRecord {
                 id: id.to_owned(),
                 title: title.to_owned(),

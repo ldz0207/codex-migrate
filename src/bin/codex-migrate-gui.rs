@@ -196,6 +196,7 @@ struct MigrationApp {
     projects: Vec<UiProject>,
     import_search: String,
     include_archived: bool,
+    include_background: bool,
     repair_projects: Vec<UiProject>,
     html_projects: Vec<UiProject>,
     html_export_folder: String,
@@ -252,6 +253,7 @@ impl MigrationApp {
             projects: Vec::new(),
             import_search: String::new(),
             include_archived: false,
+            include_background: false,
             repair_projects: Vec::new(),
             html_projects: Vec::new(),
             html_export_folder: String::new(),
@@ -425,12 +427,7 @@ impl MigrationApp {
                         self.plan = None;
                         self.step = ImportStep::Select;
                     } else {
-                        self.status = format!(
-                            "{}: {} {}",
-                            tr(zh, "预览完成", "Preview ready"),
-                            plan.threads.len(),
-                            tr(zh, "个会话", "sessions")
-                        );
+                        self.status = format!("{}: {}", tr(zh, "预览完成", "Preview ready"), import_selection_summary(&plan, zh));
                         self.success = Some(self.status.clone());
                         self.plan = Some(plan);
                         self.step = ImportStep::Preview;
@@ -862,7 +859,7 @@ impl MigrationApp {
             .projects
             .iter()
             .flat_map(|project| project.sessions.iter())
-            .filter(|session| session_matches(session, &self.import_search, self.include_archived))
+            .filter(|session| session_matches(session, &self.import_search, self.include_archived, self.include_background))
             .collect::<Vec<_>>();
         let selected = visible.iter().filter(|session| session.selected).count();
         let total = visible.len();
@@ -876,7 +873,7 @@ impl MigrationApp {
     fn set_all(&mut self, selected: bool) {
         for project in &mut self.projects {
             for session in &mut project.sessions {
-                if session_matches(session, &self.import_search, self.include_archived) {
+                if session_matches(session, &self.import_search, self.include_archived, self.include_background) {
                     session.selected = selected;
                 }
             }
@@ -1142,6 +1139,7 @@ impl MigrationApp {
                 tr(zh, "包含已归档", "Include archived"),
             );
         });
+        bool_control(ui, &mut self.include_background, tr(zh, "显示后台辅助记录", "Show background records"));
         ui.label(RichText::new(tr(zh, "默认不勾选；全选仅作用于当前搜索结果，已选对话会保留。", "Nothing is preselected. Select all affects visible results; earlier selections are retained.")).size(12.0).color(MUTED));
         ui.add_space(8.0);
         ui.horizontal(|ui| {
@@ -1172,7 +1170,7 @@ impl MigrationApp {
         ui.horizontal(|ui| {
             badge(
                 ui,
-                &format!("{} {}", self.projects.len(), tr(zh, "个项目", "projects")),
+                &format!("{} {}", self.projects.iter().filter(|project| project.sessions.iter().any(|session| session_matches(session, &self.import_search, self.include_archived, self.include_background))).count(), tr(zh, "个项目", "projects")),
                 false,
             );
             badge(
@@ -1181,9 +1179,10 @@ impl MigrationApp {
                     "{} {}",
                     self.projects
                         .iter()
-                        .map(|project| project.sessions.len())
-                        .sum::<usize>(),
-                    tr(zh, "个会话", "sessions")
+                        .flat_map(|project| project.sessions.iter())
+                        .filter(|session| session_matches(session, &self.import_search, self.include_archived, self.include_background))
+                        .count(),
+                    tr(zh, "个当前结果", "matching records")
                 ),
                 false,
             );
@@ -1221,7 +1220,7 @@ impl MigrationApp {
                     ui.set_width(ui.available_width());
                     for project_index in 0..self.projects.len() {
                         if !self.projects[project_index].sessions.iter().any(|session| {
-                            session_matches(session, &self.import_search, self.include_archived)
+                            session_matches(session, &self.import_search, self.include_archived, self.include_background)
                         }) {
                             continue;
                         }
@@ -1282,11 +1281,12 @@ impl MigrationApp {
         let zh = self.chinese();
         let query = self.import_search.clone();
         let include_archived = self.include_archived;
+        let include_background = self.include_background;
         let project = &mut self.projects[index];
         let visible = project
             .sessions
             .iter()
-            .filter(|session| session_matches(session, &query, include_archived))
+            .filter(|session| session_matches(session, &query, include_archived, include_background))
             .collect::<Vec<_>>();
         let visible_selected = visible.iter().filter(|session| session.selected).count();
         let state = if visible_selected == 0 {
@@ -1297,7 +1297,7 @@ impl MigrationApp {
             CheckState::Partial
         };
         let selected = project.selected_count();
-        let total = project.sessions.len();
+        let total = visible.len();
         egui::Frame::new()
             .fill(SURFACE)
             .stroke(Stroke::new(1.0_f32, BORDER))
@@ -1316,7 +1316,7 @@ impl MigrationApp {
                         ui.horizontal(|ui| {
                             if selection_control(ui, state, "").clicked() {
                                 for session in &mut project.sessions {
-                                    if session_matches(session, &query, include_archived) {
+                                    if session_matches(session, &query, include_archived, include_background) {
                                         session.selected = state != CheckState::All;
                                     }
                                 }
@@ -1431,7 +1431,7 @@ impl MigrationApp {
                 if project.expanded {
                     ui.add_space(4.0);
                     for session in &mut project.sessions {
-                        if !session_matches(session, &query, include_archived) {
+                        if !session_matches(session, &query, include_archived, include_background) {
                             continue;
                         }
                         ui.horizontal(|ui| {
@@ -1491,13 +1491,14 @@ impl MigrationApp {
                 )
             })
             .count();
-        let skip_count = plan.threads.len() - import_count;
+        let skip_count = plan.threads.len() - import_count - plan.conflicts;
         ui.horizontal(|ui| {
-            summary_metric(ui, tr(zh, "选择会话", "Selected"), plan.threads.len());
-            summary_metric(ui, tr(zh, "将导入", "Import"), import_count);
-            summary_metric(ui, tr(zh, "将跳过", "Skip"), skip_count);
-            summary_metric(ui, tr(zh, "冲突", "Conflicts"), plan.conflicts);
+            summary_metric(ui, tr(zh, "手选对话", "Selected chats"), plan.selected_count());
+            summary_metric(ui, tr(zh, "父会话依赖", "Required parents"), plan.dependency_count());
+            summary_metric(ui, tr(zh, "将写入记录", "Records to write"), import_count);
+            summary_metric(ui, tr(zh, "跳过记录", "Records to skip"), skip_count);
         });
+        ui.label(RichText::new(tr(zh, "仅补充所选记录引用的父会话；不会自动加入同级分支或后台审查记录。", "Only referenced parents are added; sibling forks and background reviews are not selected automatically.")).size(12.0).color(MUTED));
         ui.add_space(12.0);
 
         let available = ui.available_rect_before_wrap();
@@ -1568,7 +1569,7 @@ impl MigrationApp {
                                                         &format!(
                                                             "{} {}",
                                                             threads.len(),
-                                                            tr(zh, "个会话", "sessions")
+                                                            tr(zh, "条记录", "records")
                                                         ),
                                                         true,
                                                     );
@@ -1581,6 +1582,7 @@ impl MigrationApp {
                                     ui.horizontal_wrapped(|ui| {
                                         ui.add_space(18.0);
                                         action_badge(ui, &thread.action, zh);
+                                        badge(ui, if thread.explicitly_selected { tr(zh, "手动选择", "Selected") } else { tr(zh, "父会话依赖", "Required parent") }, thread.explicitly_selected);
                                         ui.label(
                                             RichText::new(if thread.thread.title.is_empty() {
                                                 &thread.thread.id
@@ -1594,7 +1596,7 @@ impl MigrationApp {
                                     ui.horizontal_wrapped(|ui| {
                                         ui.add_space(76.0);
                                         ui.label(
-                                            RichText::new(&thread.reason).size(12.0).color(MUTED),
+                                            RichText::new(preview_reason(&thread.reason, zh)).size(12.0).color(MUTED),
                                         );
                                     });
                                     ui.add_space(7.0);
@@ -1612,9 +1614,9 @@ impl MigrationApp {
                     if primary_action(
                         ui,
                         &format!(
-                            "{} ({})",
+                            "{} · {}",
                             tr(zh, "确认导入", "Confirm import"),
-                            plan.threads.len()
+                            import_selection_summary(&plan, zh)
                         ),
                         !self.busy,
                     )
@@ -2375,8 +2377,11 @@ impl eframe::App for MigrationApp {
     }
 }
 
-fn session_matches(session: &UiSession, query: &str, include_archived: bool) -> bool {
+fn session_matches(session: &UiSession, query: &str, include_archived: bool, include_background: bool) -> bool {
     if session.source.thread.archived && !include_archived {
+        return false;
+    }
+    if session.source.thread.is_auxiliary() && !include_background {
         return false;
     }
     let query = query.trim().to_lowercase();
@@ -2388,6 +2393,29 @@ fn session_matches(session: &UiSession, query: &str, include_archived: bool) -> 
         ]
         .iter()
         .any(|value| value.to_lowercase().contains(&query))
+}
+
+fn import_selection_summary(plan: &ImportPlan, zh: bool) -> String {
+    if plan.dependency_count() == 0 {
+        format!("{} {}", plan.selected_count(), tr(zh, "个所选对话", "selected chats"))
+    } else {
+        format!("{} {} + {} {}", plan.selected_count(), tr(zh, "个所选对话", "selected chats"), plan.dependency_count(), tr(zh, "个父会话依赖", "required parents"))
+    }
+}
+
+fn preview_reason(reason: &str, zh: bool) -> String {
+    if !zh { return reason.to_owned(); }
+    let (parent, reason) = reason.strip_prefix("Required parent session; ").map_or((false, reason), |text| (true, text));
+    let translated = match reason {
+        "thread UUID is not present" => "本机尚无此记录，将新增",
+        "source and target hashes match" => "内容与本机一致，将跳过",
+        "source and target differ only by mapped cwd metadata" => "仅工作目录映射不同，将跳过",
+        "target rollout is a normalized prefix of source" | "target rollout is a byte-for-byte prefix of source" => "来源历史更完整，将更新",
+        "source rollout is a normalized prefix of target" | "source rollout is a byte-for-byte prefix of target" => "本机历史更完整，将保留",
+        "same UUID has divergent rollout content" => "同一编号的内容存在冲突",
+        other => other,
+    };
+    if parent { format!("补充所选对话引用的父记录；{translated}") } else { translated.to_owned() }
 }
 
 fn project_to_ui(project: &SourceProject) -> UiProject {
@@ -3585,14 +3613,50 @@ mod tests {
     fn search_matches_title_uuid_path_and_respects_archive_filter() {
         let mut item = session("search-id");
         item.source.thread.title = "原标题 Search".to_owned();
-        assert!(session_matches(&item, "原标题", false));
-        assert!(session_matches(&item, "SEARCH", false));
-        assert!(session_matches(&item, "search-id", false));
-        assert!(session_matches(&item, "/old/project", false));
-        assert!(!session_matches(&item, "unrelated", false));
+        assert!(session_matches(&item, "原标题", false, false));
+        assert!(session_matches(&item, "SEARCH", false, false));
+        assert!(session_matches(&item, "search-id", false, false));
+        assert!(session_matches(&item, "/old/project", false, false));
+        assert!(!session_matches(&item, "unrelated", false, false));
         item.source.thread.archived = true;
-        assert!(!session_matches(&item, "原标题", false));
-        assert!(session_matches(&item, "原标题", true));
+        assert!(!session_matches(&item, "原标题", false, false));
+        assert!(session_matches(&item, "原标题", true, false));
+    }
+
+    #[test]
+    fn background_records_require_explicit_visibility() {
+        let mut item = session("review-id");
+        item.source.thread.thread_source = Some("guardian_review".to_owned());
+        assert!(!session_matches(&item, "", false, false));
+        assert!(session_matches(&item, "", false, true));
+        item.source.thread.thread_source = None;
+        item.source.thread.source = r#"{"subagent":{"other":"guardian"}}"#.to_owned();
+        assert!(!session_matches(&item, "", false, false));
+        assert!(session_matches(&item, "", false, true));
+        item.source.thread.archived = true;
+        assert!(!session_matches(&item, "", false, true));
+        assert!(session_matches(&item, "", true, true));
+    }
+
+    #[test]
+    fn preview_separates_selected_chats_from_dependencies() {
+        let mut threads = Vec::new();
+        for (id, selected) in [("first", true), ("second", true), ("parent", false)] {
+            threads.push(codex_migrate::model::PlannedThread {
+                thread: session(id).source.thread,
+                explicitly_selected: selected,
+                source_path: String::new(),
+                mapped_cwd: String::new(),
+                history_only: false,
+                target_path: String::new(),
+                action: MergeAction::Import,
+                reason: String::new(),
+            });
+        }
+        let plan = ImportPlan { source_codex_home: String::new(), codex_home: String::new(), threads, conflicts: 0 };
+        assert_eq!(import_selection_summary(&plan, true), "2 个所选对话 + 1 个父会话依赖");
+        assert_eq!(import_selection_summary(&plan, false), "2 selected chats + 1 required parents");
+        assert_eq!(preview_reason("Required parent session; thread UUID is not present", true), "补充所选对话引用的父记录；本机尚无此记录，将新增");
     }
 
     #[test]

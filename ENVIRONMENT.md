@@ -8,6 +8,15 @@ rollouts through the direct `zstd` 0.13.3 dependency, related-session selection,
 and native title/history verification through the installed Codex executable.
 Resolved dependencies are pinned by `Cargo.lock`; unrelated versions are retained.
 
+Selection fix on 2026-10-27: parent dependencies are traversed in one direction.
+Choosing a main chat no longer expands to all of its forks or background reviews.
+The old packaged CLI reproduced two selected chats expanding to 103 records in a
+synthetic fixture. Regression coverage checks that only the two chosen records are
+planned, that required parents are still included without siblings, and that a
+missing parent remains an error. The GUI hides auxiliary records by default and
+counts explicit choices separately from dependencies. These changes require a new
+Windows build; prior delivered binaries retain the old behavior.
+
 The optional Windows native-restoration adapter has no third-party PowerShell
 or Python package dependencies. End users need Windows PowerShell 5.1+ and an
 installed Codex executable with `thread/resume`, `thread/read`,
