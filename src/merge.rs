@@ -65,7 +65,7 @@ pub fn build_plan(
                 .join(&source_thread.record.archive_path),
         };
         if !options.selected_thread_ids.contains(thread_id) {
-            reason = format!("Required related session; {reason}");
+            reason = format!("Required parent session; {reason}");
         }
         let mut record = source_thread.record.clone();
         if let Some(target) = existing.get(thread_id) {
@@ -77,6 +77,7 @@ pub fn build_plan(
         }
         threads.push(PlannedThread {
             thread: record,
+            explicitly_selected: options.selected_thread_ids.contains(thread_id),
             source_path: source_thread.source_path.to_string_lossy().into_owned(),
             mapped_cwd: mapped_cwd.to_string_lossy().into_owned(),
             history_only,
@@ -103,7 +104,7 @@ pub fn build_plan(
     })
 }
 
-fn related_ids(thread: &ScannedThread) -> BTreeSet<String> {
+fn required_parent_ids(thread: &ScannedThread) -> BTreeSet<String> {
     let mut ids = BTreeSet::new();
     for line in thread.content.split(|byte| *byte == b'\n') {
         let Ok(value) = serde_json::from_slice::<serde_json::Value>(line) else {
@@ -152,15 +153,13 @@ fn expand_selection(
         .collect::<BTreeSet<_>>();
     let mut graph: HashMap<String, BTreeSet<String>> = HashMap::new();
     for thread in threads {
-        for related in related_ids(thread) {
+        for related in required_parent_ids(thread) {
             graph
                 .entry(thread.record.id.clone())
                 .or_default()
                 .insert(related.clone());
-            graph
-                .entry(related)
-                .or_default()
-                .insert(thread.record.id.clone());
+            // A child may need its parent, but selecting a parent must not
+            // select every fork, subagent and Guardian review that refers to it.
         }
     }
     let mut result = selected.clone();

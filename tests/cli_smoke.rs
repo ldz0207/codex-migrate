@@ -439,7 +439,7 @@ fn repeated_import_repairs_visibility_and_registers_project() {
 }
 
 #[test]
-fn imports_compressed_selection_with_original_name_and_dependencies() {
+fn imports_explicit_compressed_selection_and_background_record() {
     use codex_migrate::{model::ImportOptions, operations};
     use std::collections::BTreeSet;
     let source = TempDir::new().unwrap();
@@ -502,7 +502,7 @@ fn imports_compressed_selection_with_original_name_and_dependencies() {
     )
     .unwrap();
     let options = ImportOptions {
-        selected_thread_ids: BTreeSet::from([id.to_owned()]),
+        selected_thread_ids: BTreeSet::from([id.to_owned(), child.to_owned()]),
         mappings: [(
             "/old/project/demo".to_owned(),
             project.path().to_string_lossy().into_owned(),
@@ -514,10 +514,8 @@ fn imports_compressed_selection_with_original_name_and_dependencies() {
     let plan =
         operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap();
     assert_eq!(plan.threads.len(), 2);
-    assert!(plan
-        .threads
-        .iter()
-        .any(|item| item.thread.id == child && item.reason.starts_with("Required related")));
+    assert_eq!(plan.selected_count(), 2);
+    assert_eq!(plan.dependency_count(), 0);
     assert_eq!(
         plan.threads
             .iter()
@@ -558,6 +556,105 @@ fn imports_compressed_selection_with_original_name_and_dependencies() {
             .skipped,
         2
     );
+}
+
+#[test]
+fn selecting_two_chats_does_not_import_101_background_siblings() {
+    use codex_migrate::{model::ImportOptions, operations};
+    use std::collections::BTreeSet;
+    let source = TempDir::new().unwrap();
+    let target = TempDir::new().unwrap();
+    let project = TempDir::new().unwrap();
+    let main = "10000000-0000-0000-0000-000000000001";
+    let other = "10000000-0000-0000-0000-000000000002";
+    create_empty_state_db(target.path());
+    let cwd = project.path().to_string_lossy().into_owned();
+    create_rollout(source.path(), main, &cwd, "First selected chat", false);
+    create_rollout(source.path(), other, &cwd, "Second selected chat", false);
+    for index in 0..101 {
+        let id = format!("20000000-0000-0000-0000-{index:012}");
+        let path = create_rollout(source.path(), &id, &cwd, "Guardian review", false);
+        set_rollout_parent(&path, main, true);
+    }
+    let options = ImportOptions {
+        selected_thread_ids: BTreeSet::from([main.to_owned(), other.to_owned()]),
+        ..Default::default()
+    };
+    let plan =
+        operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap();
+    assert_eq!(plan.threads.len(), 2);
+    assert_eq!(plan.selected_count(), 2);
+    assert_eq!(plan.dependency_count(), 0);
+    assert!(plan.threads.iter().all(|item| !item.thread.is_auxiliary()));
+}
+
+#[test]
+fn selected_child_requires_ancestors_without_importing_siblings() {
+    use codex_migrate::{model::ImportOptions, operations};
+    use std::collections::BTreeSet;
+    let source = TempDir::new().unwrap();
+    let target = TempDir::new().unwrap();
+    let project = TempDir::new().unwrap();
+    let parent = "30000000-0000-0000-0000-000000000001";
+    let child = "30000000-0000-0000-0000-000000000002";
+    let sibling = "30000000-0000-0000-0000-000000000003";
+    let cwd = project.path().to_string_lossy().into_owned();
+    create_empty_state_db(target.path());
+    let parent_path = create_rollout(source.path(), parent, &cwd, "Parent", false);
+    let child_path = create_rollout(source.path(), child, &cwd, "Selected child", false);
+    set_rollout_parent(&child_path, parent, false);
+    let sibling_path = create_rollout(source.path(), sibling, &cwd, "Unselected sibling", false);
+    set_rollout_parent(&sibling_path, parent, false);
+    let options = ImportOptions {
+        selected_thread_ids: BTreeSet::from([child.to_owned()]),
+        ..Default::default()
+    };
+    let plan =
+        operations::plan_directory_import(source.path(), Some(target.path()), &options).unwrap();
+    let ids = plan
+        .threads
+        .iter()
+        .map(|item| item.thread.id.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(ids, BTreeSet::from([parent, child]));
+    assert_eq!(plan.selected_count(), 1);
+    assert_eq!(plan.dependency_count(), 1);
+    assert!(plan
+        .threads
+        .iter()
+        .find(|item| item.thread.id == parent)
+        .unwrap()
+        .reason
+        .starts_with("Required parent"));
+    fs::remove_file(parent_path).unwrap();
+    let error = operations::plan_directory_import(source.path(), Some(target.path()), &options)
+        .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("required related session is missing"));
+}
+
+fn set_rollout_parent(path: &Path, parent: &str, guardian: bool) {
+    let text = fs::read_to_string(path).unwrap();
+    let mut lines = text
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    if guardian {
+        lines[0]["payload"]["id"] = json!(parent);
+        lines[0]["payload"]["thread_source"] = json!("guardian_review");
+        lines[0]["payload"]["source"] = json!({"subagent":{"other":"guardian"}});
+    } else {
+        lines[0]["payload"]["forked_from_thread_id"] = json!(parent);
+    }
+    fs::write(
+        path,
+        lines
+            .iter()
+            .map(|line| line.to_string() + "\n")
+            .collect::<String>(),
+    )
+    .unwrap();
 }
 
 #[test]
